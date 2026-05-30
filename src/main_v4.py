@@ -36,6 +36,26 @@ def log_event(event: str, **payload):
     logger.info(json.dumps({"event": event, **payload}, default=str))
 
 
+INDICATOR_COLUMNS = [
+    ("Opening", "opening_activity"),
+    ("News", "news_sentiment"),
+    ("Catalyst", "news_catalyst"),
+    ("Trend", "trend"),
+    ("RS", "relative_strength"),
+    ("Sector", "sector_strength"),
+    ("Breakout", "breakout"),
+    ("Options", "options_flow"),
+    ("Earnings", "earnings"),
+    ("Political", "political_geo"),
+    ("Trade", "politician_trade"),
+    ("Risk", "risk_quality"),
+]
+
+
+def indicator_text(row: dict) -> str:
+    return " | ".join(f"{label} {row.get(key, 0):.0f}" for label, key in INDICATOR_COLUMNS)
+
+
 def analyze_universe():
     spy_df = get_history("SPY")
     qqq_df = get_history("QQQ")
@@ -139,21 +159,23 @@ def analyze_universe():
 
 
 def html_table(title, rows, reason_mode="normal"):
+    indicator_headers = "\n".join(
+        f'<th align="right" style="border:1px solid #ddd;">{label}</th>'
+        for label, _ in INDICATOR_COLUMNS
+    )
     html = f"""
     <h2 style="margin-top:28px;border-bottom:2px solid #222;padding-bottom:6px;">{title}</h2>
-    <table width="100%" cellpadding="8" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px;">
+    <table width="100%" cellpadding="6" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:12px;">
       <tr style="background:#f2f2f2;">
         <th align="left" style="border:1px solid #ddd;">Ticker</th>
-        <th align="right" style="border:1px solid #ddd;">Opening</th>
-        <th align="right" style="border:1px solid #ddd;">News</th>
-        <th align="right" style="border:1px solid #ddd;">Options</th>
-        <th align="right" style="border:1px solid #ddd;">Earnings</th>
+        {indicator_headers}
         <th align="left" style="border:1px solid #ddd;">Regime</th>
         <th align="left" style="border:1px solid #ddd;">Why buy this?</th>
       </tr>
     """
     if not rows:
-        html += '<tr><td style="border:1px solid #ddd;">None</td><td colspan="6" style="border:1px solid #ddd;">No matching setups today.</td></tr>'
+        colspan = len(INDICATOR_COLUMNS) + 3
+        html += f'<tr><td colspan="{colspan}" style="border:1px solid #ddd;">No matching setups today.</td></tr>'
 
     for r in rows:
         score_label = f"Score {r['score']:.1f}"
@@ -171,14 +193,15 @@ def html_table(title, rows, reason_mode="normal"):
         sentiment_reason = r.get("sentiment_reasoning")
         if sentiment_reason and reason_mode == "normal":
             why += f"<br><span style='color:#555;'>OpenAI: {escape(sentiment_reason)}</span>"
+        indicator_cells = "\n".join(
+            f'<td align="right" style="border:1px solid #ddd;vertical-align:top;">{r.get(key, 0):.0f}</td>'
+            for _, key in INDICATOR_COLUMNS
+        )
 
         html += f"""
         <tr>
-          <td style="border:1px solid #ddd;vertical-align:top;width:28%;">{ticker_cell}</td>
-          <td align="right" style="border:1px solid #ddd;vertical-align:top;">{r.get('opening_activity', 0):.0f}</td>
-          <td align="right" style="border:1px solid #ddd;vertical-align:top;">{r.get('news_sentiment', 0):.0f}</td>
-          <td align="right" style="border:1px solid #ddd;vertical-align:top;">{r.get('options_flow', 0):.0f}</td>
-          <td align="right" style="border:1px solid #ddd;vertical-align:top;">{r.get('earnings', 0):.0f}</td>
+          <td style="border:1px solid #ddd;vertical-align:top;width:16%;">{ticker_cell}</td>
+          {indicator_cells}
           <td style="border:1px solid #ddd;vertical-align:top;">{r.get('regime', 'NEUTRAL')}</td>
           <td style="border:1px solid #ddd;vertical-align:top;">{why}</td>
         </tr>
@@ -250,9 +273,7 @@ def build_email(results, spy_df, qqq_df, regime):
         text += f"\n{title}\n"
         for r in rows:
             text += (
-                f"{r['ticker']} Score: {r['score']:.1f} | Opening {r.get('opening_activity', 0):.0f} | "
-                f"News {r.get('news_sentiment', 0):.0f} | Options {r.get('options_flow', 0):.0f} | "
-                f"Earnings {r.get('earnings', 0):.0f} | Regime {r.get('regime', 'NEUTRAL')}\n"
+                f"{r['ticker']} Score: {r['score']:.1f} | {indicator_text(r)} | Regime {r.get('regime', 'NEUTRAL')}\n"
                 f"Drivers: {why_buy(r, mode == 'earnings', mode in ['catalyst', 'political'])}\n"
             )
             if mode == "normal" and r.get("sentiment_reasoning"):

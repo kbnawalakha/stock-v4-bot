@@ -10,6 +10,9 @@ Email sections:
 - Catalyst Watch
 - Political / Geopolitical Watch
 
+GitHub Actions sends reports on weekday mornings at 7:05 AM Pacific during
+daylight time and on Sunday at 10:00 PM Pacific during daylight time.
+
 Required GitHub Secrets:
 - OPENAI_API_KEY
 - FINNHUB_API_KEY
