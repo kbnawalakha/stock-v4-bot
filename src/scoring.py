@@ -1,8 +1,8 @@
 from config import STRATEGY_WEIGHTS
 
 
-def regime_adjusted_weights(regime: str | None) -> dict[str, float]:
-    weights = dict(STRATEGY_WEIGHTS)
+def regime_adjusted_weights(regime: str | None, base_weights: dict[str, float] | None = None) -> dict[str, float]:
+    weights = dict(base_weights or STRATEGY_WEIGHTS)
     if regime == "RISK_ON":
         weights["trend"] *= 1.25
         weights["options_flow"] *= 1.25

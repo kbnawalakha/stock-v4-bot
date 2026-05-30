@@ -24,6 +24,7 @@ from politician_trades import politician_trade_score
 from earnings import earnings_proximity_score, earnings_score
 from market_regime import classify_market_regime
 from scoring import final_score, earnings_setup_score, catalyst_watch_score, regime_adjusted_weights
+from learning import refresh_learning_state
 from performance import log_predictions
 from emailer import send_email
 
@@ -75,7 +76,7 @@ def upside_reason(row: dict, reason_mode: str = "normal") -> str:
     return reason
 
 
-def analyze_universe():
+def analyze_universe(base_weights: dict[str, float] | None = None):
     spy_df = get_history("SPY")
     qqq_df = get_history("QQQ")
     sector_cache = {}
@@ -135,7 +136,7 @@ def analyze_universe():
                 "sentiment_reasoning": "OpenAI overnight sentiment not evaluated before top-20 filtering.",
                 **features,
             }
-            row["score"] = final_score(row)
+            row["score"] = final_score(row, base_weights)
             row["earnings_score"] = earnings_setup_score(row)
             row["catalyst_watch_score"] = catalyst_watch_score(row)
             results.append(row)
@@ -182,8 +183,8 @@ def analyze_universe():
         log_event("sentiment_score", ticker=row["ticker"], **sentiment)
 
     regime = classify_market_regime()
-    weights = regime_adjusted_weights(str(regime["regime"]))
-    log_event("regime", **regime, weights=weights)
+    weights = regime_adjusted_weights(str(regime["regime"]), base_weights)
+    log_event("regime", **regime, learned_base_weights=base_weights, weights=weights)
 
     for row in preliminary:
         row["regime"] = regime["regime"]
@@ -294,7 +295,9 @@ def build_email(results, spy_df, qqq_df, regime):
 
 
 def main():
-    results, spy_df, qqq_df, regime = analyze_universe()
+    learned_weights = refresh_learning_state()
+    log_event("learned_weights", weights=learned_weights)
+    results, spy_df, qqq_df, regime = analyze_universe(learned_weights)
     html, text, top_10 = build_email(results, spy_df, qqq_df, regime)
 
     print(text)

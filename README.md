@@ -2,6 +2,8 @@
 
 Daily stock signal bot with regime-aware ranking, overnight OpenAI sentiment,
 opening activity, options flow, earnings, catalyst, and political/geopolitical signals.
+The bot stores recommendations in `predictions.csv`, evaluates prior picks against
+SPY, and updates `learning_state.json` so signal weights can adapt over time.
 
 Email sections:
 - Top 10 Stocks

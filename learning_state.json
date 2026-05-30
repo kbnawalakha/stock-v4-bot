@@ -1,0 +1,27 @@
+{
+  "evaluated": [],
+  "last_updated": null,
+  "learned_weights": {
+    "earnings": 0.1,
+    "news_sentiment": 0.2,
+    "opening_activity": 0.2,
+    "options_flow": 0.1,
+    "political_geo": 0.03,
+    "politician_trade": 0.02,
+    "relative_strength": 0.1,
+    "sector_strength": 0.1,
+    "trend": 0.15
+  },
+  "signal_scores": {
+    "earnings": 0.0,
+    "news_sentiment": 0.0,
+    "opening_activity": 0.0,
+    "options_flow": 0.0,
+    "political_geo": 0.0,
+    "politician_trade": 0.0,
+    "relative_strength": 0.0,
+    "sector_strength": 0.0,
+    "trend": 0.0
+  },
+  "version": 1
+}
