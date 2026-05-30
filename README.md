@@ -23,5 +23,6 @@ Required GitHub Secrets:
 Optional:
 - POLITICIAN_TRADE_API_URL
 - POLITICIAN_TRADE_API_KEY
+- FINNHUB_MAX_CALLS_PER_MINUTE defaults to 60
 
 The politician-trade module has safe fallback behavior. If no API is configured, it still checks public web sources and keyword-based geopolitical catalysts.

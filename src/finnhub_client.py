@@ -1,6 +1,7 @@
 import logging
 import os
 import time
+from collections import deque
 from datetime import date, timedelta
 from typing import Any
 
@@ -9,6 +10,7 @@ import requests
 BASE_URL = "https://finnhub.io/api/v1"
 TIMEOUT_SECONDS = 12
 MAX_RETRIES = 3
+DEFAULT_MAX_CALLS_PER_MINUTE = 60
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +19,9 @@ class FinnhubClient:
     def __init__(self, api_key: str | None = None) -> None:
         self.api_key = api_key or os.getenv("FINNHUB_API_KEY")
         self.session = requests.Session()
+        self.max_calls_per_minute = int(os.getenv("FINNHUB_MAX_CALLS_PER_MINUTE", DEFAULT_MAX_CALLS_PER_MINUTE))
+        self.calls_made = 0
+        self._call_timestamps = deque()
 
     @property
     def available(self) -> bool:
@@ -30,6 +35,8 @@ class FinnhubClient:
         url = f"{BASE_URL}{path}"
         for attempt in range(MAX_RETRIES):
             try:
+                self._throttle()
+                self.calls_made += 1
                 response = self.session.get(url, params=payload, timeout=TIMEOUT_SECONDS)
                 if response.status_code == 429:
                     sleep_for = min(2 ** attempt, 8)
@@ -52,6 +59,24 @@ class FinnhubClient:
                 if attempt < MAX_RETRIES - 1:
                     time.sleep(min(2 ** attempt, 8))
         return None
+
+    def _throttle(self) -> None:
+        now = time.monotonic()
+        while self._call_timestamps and now - self._call_timestamps[0] >= 60:
+            self._call_timestamps.popleft()
+
+        if len(self._call_timestamps) >= self.max_calls_per_minute:
+            sleep_for = 60 - (now - self._call_timestamps[0])
+            logger.info(
+                "finnhub_rate_throttle",
+                extra={"sleep_seconds": sleep_for, "max_calls_per_minute": self.max_calls_per_minute},
+            )
+            time.sleep(max(0.0, sleep_for))
+            now = time.monotonic()
+            while self._call_timestamps and now - self._call_timestamps[0] >= 60:
+                self._call_timestamps.popleft()
+
+        self._call_timestamps.append(time.monotonic())
 
     def overnight_company_news(self, ticker: str) -> list[dict[str, Any]]:
         today = date.today()

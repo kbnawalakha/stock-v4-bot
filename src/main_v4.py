@@ -16,7 +16,7 @@ from indicators import (
     risk_quality_score,
 )
 from news_catalyst import news_catalyst_score, get_recent_headlines
-from openai_sentiment import score_overnight_sentiment
+from openai_sentiment import score_overnight_sentiments
 from opening_activity import opening_activity_score
 from options_flow import options_flow_score
 from political_geo import political_geo_score
@@ -93,8 +93,7 @@ def analyze_universe():
                 sector_cache[sector_ticker] = get_history(sector_ticker)
 
             news_score, catalysts, has_catalyst = news_catalyst_score(ticker)
-            finnhub_headlines = get_finnhub_client().overnight_headlines(ticker)
-            headlines = finnhub_headlines or get_recent_headlines(ticker)
+            headlines = get_recent_headlines(ticker)
             pg_score, pg_reasons = political_geo_score(ticker, headlines)
             pol_score, pol_reasons = politician_trade_score(ticker)
             opening = opening_activity_score(ticker)
@@ -156,8 +155,27 @@ def analyze_universe():
     top_20 = preliminary[:20]
     log_event("top_20_candidates", tickers=[r["ticker"] for r in top_20])
 
+    finnhub_client = get_finnhub_client()
     for row in top_20:
-        sentiment = score_overnight_sentiment(row["ticker"], row.get("headlines", []))
+        finnhub_headlines = finnhub_client.overnight_headlines(row["ticker"])
+        if finnhub_headlines:
+            row["headlines"] = finnhub_headlines
+        log_event(
+            "finnhub_news_enrichment",
+            ticker=row["ticker"],
+            headline_count=len(finnhub_headlines),
+            calls_made=finnhub_client.calls_made,
+            max_calls_per_minute=finnhub_client.max_calls_per_minute,
+        )
+
+    sentiment_results = score_overnight_sentiments(top_20)
+    log_event("openai_sentiment_batch", tickers=list(sentiment_results.keys()), calls_made=1)
+    for row in top_20:
+        sentiment = sentiment_results.get(row["ticker"], {
+            "sentiment": 50.0,
+            "confidence": 0.0,
+            "reasoning": "OpenAI sentiment result missing; sentiment score neutral.",
+        })
         row["news_sentiment"] = sentiment["sentiment"]
         row["sentiment_confidence"] = sentiment["confidence"]
         row["sentiment_reasoning"] = sentiment["reasoning"]

@@ -75,34 +75,35 @@ def _latest_finnhub_earnings_date(ticker: str) -> int | None:
         return None
 
 
-def earnings_score(ticker: str) -> dict[str, float | int | None]:
+def earnings_score(ticker: str, use_finnhub: bool = False) -> dict[str, float | int | None]:
     dte = days_until_earnings(ticker)
-    if dte is None:
+    if use_finnhub and dte is None:
         dte = _latest_finnhub_earnings_date(ticker)
 
     eps_surprise = 0.0
     revenue_surprise = 0.0
     guidance_score = 50.0
 
-    try:
-        surprises = get_finnhub_client().earnings_surprises(ticker)
-        if surprises:
-            latest = surprises[0]
-            actual = latest.get("actual")
-            estimate = latest.get("estimate")
-            if actual is not None and estimate not in (None, 0):
-                eps_surprise = (float(actual) - float(estimate)) / abs(float(estimate)) * 100
+    if use_finnhub:
+        try:
+            surprises = get_finnhub_client().earnings_surprises(ticker)
+            if surprises:
+                latest = surprises[0]
+                actual = latest.get("actual")
+                estimate = latest.get("estimate")
+                if actual is not None and estimate not in (None, 0):
+                    eps_surprise = (float(actual) - float(estimate)) / abs(float(estimate)) * 100
 
-            revenue_actual = latest.get("revenueActual") or latest.get("actualRevenue")
-            revenue_estimate = latest.get("revenueEstimate") or latest.get("estimateRevenue")
-            if revenue_actual is not None and revenue_estimate not in (None, 0):
-                revenue_surprise = (float(revenue_actual) - float(revenue_estimate)) / abs(float(revenue_estimate)) * 100
+                revenue_actual = latest.get("revenueActual") or latest.get("actualRevenue")
+                revenue_estimate = latest.get("revenueEstimate") or latest.get("estimateRevenue")
+                if revenue_actual is not None and revenue_estimate not in (None, 0):
+                    revenue_surprise = (float(revenue_actual) - float(revenue_estimate)) / abs(float(revenue_estimate)) * 100
 
-            surprise_pct = latest.get("surprisePercent")
-            if surprise_pct is not None and eps_surprise == 0:
-                eps_surprise = float(surprise_pct)
-    except Exception as exc:
-        logger.warning("earnings_surprise_failed", extra={"ticker": ticker, "error": str(exc)})
+                surprise_pct = latest.get("surprisePercent")
+                if surprise_pct is not None and eps_surprise == 0:
+                    eps_surprise = float(surprise_pct)
+        except Exception as exc:
+            logger.warning("earnings_surprise_failed", extra={"ticker": ticker, "error": str(exc)})
 
     proximity = earnings_proximity_score(dte)
     eps_score = _clamp(50 + eps_surprise * 4)
