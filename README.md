@@ -21,7 +21,7 @@ Required GitHub Secrets:
 - FINNHUB_API_KEY
 - EMAIL_USER
 - EMAIL_PASS
-- EMAIL_TO
+- EMAIL_TO, one or more recipients separated by commas or semicolons
 
 Optional:
 - POLITICIAN_TRADE_API_URL
