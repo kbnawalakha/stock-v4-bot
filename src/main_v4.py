@@ -19,6 +19,8 @@ from news_catalyst import news_catalyst_score, get_recent_headlines
 from openai_sentiment import score_overnight_sentiments
 from opening_activity import opening_activity_score
 from options_flow import options_flow_score
+from institutional import institutional_ownership_score
+from pattern_trading import pattern_trading_score
 from political_geo import political_geo_score
 from politician_trades import politician_trade_score
 from earnings import earnings_proximity_score, earnings_score
@@ -47,6 +49,14 @@ def upside_reason(row: dict, reason_mode: str = "normal") -> str:
         drivers.append("overnight news sentiment is bullish")
     if row.get("options_flow", 0) >= 70:
         drivers.append("options flow is leaning bullish")
+    if row.get("pattern_trading", 0) >= 70:
+        patterns = row.get("pattern_details", {}).get("patterns", [])
+        if patterns:
+            drivers.append(patterns[0])
+        else:
+            drivers.append("daily and weekly trading patterns are constructive")
+    if row.get("institutional_ownership", 0) >= 70:
+        drivers.append(row.get("institutional_details", {}).get("reason", "institutional ownership is supportive"))
     if row.get("trend", 0) >= 75:
         drivers.append("the stock remains in a strong trend")
     if row.get("sector_strength", 0) >= 20:
@@ -100,9 +110,13 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
             opening = opening_activity_score(ticker)
             earnings = earnings_score(ticker)
             options = options_flow_score(ticker)
+            institutional = institutional_ownership_score(ticker)
+            patterns = pattern_trading_score(df)
             log_event("opening_activity_score", ticker=ticker, **opening)
             log_event("earnings_score", ticker=ticker, **earnings)
             log_event("options_score", ticker=ticker, **options)
+            log_event("institutional_score", ticker=ticker, **institutional)
+            log_event("pattern_trading_score", ticker=ticker, **patterns)
 
             features = {
                 "trend": trend_score(df),
@@ -117,6 +131,8 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
                 "opening_activity": opening["score"],
                 "earnings": earnings["score"],
                 "options_flow": options["score"],
+                "institutional_ownership": institutional["score"],
+                "pattern_trading": patterns["score"],
                 "earnings_proximity": earnings_proximity_score(earnings.get("days_to_earnings")),
             }
 
@@ -132,6 +148,8 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
                 "opening_details": opening,
                 "earnings_details": earnings,
                 "options_details": options,
+                "institutional_details": institutional,
+                "pattern_details": patterns,
                 "sentiment_confidence": 0.0,
                 "sentiment_reasoning": "OpenAI overnight sentiment not evaluated before top-20 filtering.",
                 **features,

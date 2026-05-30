@@ -14,15 +14,17 @@ CATALYST_N = 5
 POLITICAL_N = 5
 
 STRATEGY_WEIGHTS = {
-    "opening_activity": 0.20,
-    "news_sentiment": 0.20,
-    "trend": 0.15,
-    "relative_strength": 0.10,
-    "sector_strength": 0.10,
-    "options_flow": 0.10,
-    "earnings": 0.10,
-    "political_geo": 0.03,
-    "politician_trade": 0.02,
+    "opening_activity": 0.18,
+    "news_sentiment": 0.18,
+    "trend": 0.13,
+    "relative_strength": 0.09,
+    "sector_strength": 0.08,
+    "options_flow": 0.09,
+    "earnings": 0.08,
+    "institutional_ownership": 0.07,
+    "pattern_trading": 0.07,
+    "political_geo": 0.02,
+    "politician_trade": 0.01,
 }
 
 BENCHMARKS = ["SPY", "QQQ"]
