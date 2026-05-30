@@ -42,6 +42,19 @@ SECTOR_ETF_MAP = {
     "URA": "URA"
 }
 
+SECTOR_LABELS = {
+    "SOXX": "Semiconductors",
+    "XLK": "Technology",
+    "XLF": "Financials",
+    "XLV": "Healthcare",
+    "XLY": "Consumer Discretionary",
+    "XLC": "Communication Services",
+    "ITA": "Aerospace & Defense",
+    "XLE": "Energy",
+    "URA": "Uranium",
+    "SPY": "Broad Market",
+}
+
 GEOPOLITICAL_SECTOR_BOOSTS = {
     "defense": ["LMT", "RTX", "NOC", "GD", "BA", "HII", "RKLB"],
     "energy": ["XOM", "CVX", "LNG"],

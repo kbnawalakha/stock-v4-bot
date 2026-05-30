@@ -4,7 +4,16 @@ import logging
 from html import escape
 from zoneinfo import ZoneInfo
 
-from config import UNIVERSE, TOP_N, UNDER_30_N, EARNINGS_N, CATALYST_N, POLITICAL_N, SECTOR_ETF_MAP
+from config import (
+    UNIVERSE,
+    TOP_N,
+    UNDER_30_N,
+    EARNINGS_N,
+    CATALYST_N,
+    POLITICAL_N,
+    SECTOR_ETF_MAP,
+    SECTOR_LABELS,
+)
 from finnhub_client import get_finnhub_client
 from market_data import get_history
 from indicators import (
@@ -84,6 +93,84 @@ def upside_reason(row: dict, reason_mode: str = "normal") -> str:
     if sentiment_reason and row.get("sentiment_confidence", 0) > 0:
         reason += f" OpenAI sentiment note: {sentiment_reason}"
     return reason
+
+
+def sector_extreme_signals(spy_df, qqq_df) -> list[dict]:
+    sectors = sorted(set(SECTOR_ETF_MAP.values()) - {"SPY", "QQQ"})
+    signals = []
+    for etf in sectors:
+        try:
+            df = get_history(etf)
+            if df.empty or len(df) < 80:
+                continue
+
+            trend = trend_score(df)
+            five_day = pct_return(df, 5)
+            twenty_day = pct_return(df, 20)
+            rel_spy = twenty_day - pct_return(spy_df, 20)
+            pattern = pattern_trading_score(df)
+            close = df["Close"]
+            price = float(close.iloc[-1])
+            ma20 = float(close.rolling(20).mean().iloc[-1])
+            ma50 = float(close.rolling(50).mean().iloc[-1])
+            prior_20_low = float(df["Low"].iloc[-21:-1].min())
+
+            bullish_points = 0
+            bullish_reasons = []
+            if trend >= 80:
+                bullish_points += 30
+                bullish_reasons.append("trend is strongly bullish")
+            if twenty_day >= 5:
+                bullish_points += 20
+                bullish_reasons.append(f"20-day return is {twenty_day:.1f}%")
+            if rel_spy >= 3:
+                bullish_points += 20
+                bullish_reasons.append(f"outperforming SPY by {rel_spy:.1f}% over 20 days")
+            if pattern["score"] >= 75:
+                bullish_points += 20
+                bullish_reasons.append(pattern["patterns"][0])
+            if price > ma20 > ma50:
+                bullish_points += 10
+                bullish_reasons.append("price is above rising short-term support")
+
+            bearish_points = 0
+            bearish_reasons = []
+            if trend <= 20:
+                bearish_points += 25
+                bearish_reasons.append("trend is weak")
+            if twenty_day <= -5:
+                bearish_points += 25
+                bearish_reasons.append(f"20-day return is {twenty_day:.1f}%")
+            if rel_spy <= -3:
+                bearish_points += 20
+                bearish_reasons.append(f"underperforming SPY by {abs(rel_spy):.1f}% over 20 days")
+            if price < ma20 < ma50:
+                bearish_points += 15
+                bearish_reasons.append("price is below declining short-term support")
+            if price < prior_20_low:
+                bearish_points += 15
+                bearish_reasons.append("price is breaking below a 20-day range")
+
+            if bullish_points >= 75 or bearish_points >= 75:
+                signal_type = "BULL" if bullish_points >= bearish_points else "BEAR"
+                score = bullish_points if signal_type == "BULL" else bearish_points
+                reasons = bullish_reasons if signal_type == "BULL" else bearish_reasons
+                signal = {
+                    "sector": SECTOR_LABELS.get(etf, etf),
+                    "etf": etf,
+                    "signal": signal_type,
+                    "score": min(100.0, float(score)),
+                    "five_day": five_day,
+                    "twenty_day": twenty_day,
+                    "relative_to_spy": rel_spy,
+                    "reason": "; ".join(reasons[:3]) + ".",
+                }
+                signals.append(signal)
+                log_event("sector_extreme_signal", **signal)
+        except Exception as exc:
+            log_event("sector_extreme_failed", etf=etf, error=str(exc))
+
+    return sorted(signals, key=lambda x: x["score"], reverse=True)[:5]
 
 
 def analyze_universe(base_weights: dict[str, float] | None = None):
@@ -211,7 +298,8 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
         row["earnings_score"] = earnings_setup_score(row)
         row["catalyst_watch_score"] = catalyst_watch_score(row)
 
-    return sorted(preliminary, key=lambda x: x["score"], reverse=True), spy_df, qqq_df, regime
+    sectors = sector_extreme_signals(spy_df, qqq_df)
+    return sorted(preliminary, key=lambda x: x["score"], reverse=True), spy_df, qqq_df, regime, sectors
 
 
 def html_table(title, rows, reason_mode="normal"):
@@ -242,7 +330,34 @@ def html_table(title, rows, reason_mode="normal"):
     return html
 
 
-def build_email(results, spy_df, qqq_df, regime):
+def html_sector_extremes(rows):
+    html = """
+    <h2 style="margin-top:28px;border-bottom:2px solid #222;padding-bottom:6px;">Extreme Sector Signals</h2>
+    <table width="100%" cellpadding="8" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px;">
+      <tr style="background:#f2f2f2;">
+        <th align="left" style="border:1px solid #ddd;">Sector</th>
+        <th align="left" style="border:1px solid #ddd;">Signal</th>
+        <th align="right" style="border:1px solid #ddd;">Strength</th>
+        <th align="left" style="border:1px solid #ddd;">Reason</th>
+      </tr>
+    """
+    if not rows:
+        html += '<tr><td colspan="4" style="border:1px solid #ddd;">No extreme sector bull or bear signal today.</td></tr>'
+
+    for row in rows:
+        html += f"""
+        <tr>
+          <td style="border:1px solid #ddd;vertical-align:top;"><b>{escape(row["sector"])}</b><br><span style="color:#666;">{row["etf"]}</span></td>
+          <td style="border:1px solid #ddd;vertical-align:top;">{row["signal"]}</td>
+          <td align="right" style="border:1px solid #ddd;vertical-align:top;">{row["score"]:.0f}</td>
+          <td style="border:1px solid #ddd;vertical-align:top;">{escape(row["reason"])}</td>
+        </tr>
+        """
+    html += "</table>"
+    return html
+
+
+def build_email(results, spy_df, qqq_df, regime, sector_extremes):
     now_pt = datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%Y-%m-%d %I:%M %p %Z")
     spy_20 = pct_return(spy_df, 20)
     qqq_20 = pct_return(qqq_df, 20)
@@ -279,6 +394,7 @@ def build_email(results, spy_df, qqq_df, regime):
         Regime: {regime.get("regime", "NEUTRAL")} ({float(regime.get("confidence", 0)):.0%} confidence)
       </div>
 
+      {html_sector_extremes(sector_extremes)}
       {html_table("Top 10 Stocks", top_10)}
       {html_table("Top 5 Under $30", under_30)}
       {html_table("Top 5 Earnings Setups", earnings, reason_mode="earnings")}
@@ -294,6 +410,16 @@ def build_email(results, spy_df, qqq_df, regime):
     """
 
     text = "Daily Stock Alpha Report\n\n"
+    text += "\nExtreme Sector Signals\n"
+    if sector_extremes:
+        for sector in sector_extremes:
+            text += (
+                f"{sector['sector']} ({sector['etf']}) | {sector['signal']} | Strength {sector['score']:.0f}\n"
+                f"Reason: {sector['reason']}\n"
+            )
+    else:
+        text += "No extreme sector bull or bear signal today.\n"
+
     sections = [
         ("Top 10 Stocks", top_10, "normal"),
         ("Top 5 Under $30", under_30, "normal"),
@@ -315,8 +441,8 @@ def build_email(results, spy_df, qqq_df, regime):
 def main():
     learned_weights = refresh_learning_state()
     log_event("learned_weights", weights=learned_weights)
-    results, spy_df, qqq_df, regime = analyze_universe(learned_weights)
-    html, text, top_10 = build_email(results, spy_df, qqq_df, regime)
+    results, spy_df, qqq_df, regime, sector_extremes = analyze_universe(learned_weights)
+    html, text, top_10 = build_email(results, spy_df, qqq_df, regime, sector_extremes)
 
     print(text)
     log_predictions(top_10)
