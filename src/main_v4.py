@@ -25,7 +25,7 @@ from indicators import (
     risk_quality_score,
 )
 from news_catalyst import news_catalyst_score, get_recent_headlines
-from openai_sentiment import score_overnight_sentiments
+from gemini_sentiment import score_overnight_sentiments
 from opening_activity import opening_activity_score
 from options_flow import options_flow_score
 from institutional import institutional_ownership_score
@@ -91,7 +91,7 @@ def upside_reason(row: dict, reason_mode: str = "normal") -> str:
     reason = f"{row['ticker']} has upside potential because " + ", ".join(drivers[:3]) + "."
     sentiment_reason = row.get("sentiment_reasoning")
     if sentiment_reason and row.get("sentiment_confidence", 0) > 0:
-        reason += f" OpenAI sentiment note: {sentiment_reason}"
+        reason += f" Gemini sentiment note: {sentiment_reason}"
     return reason
 
 
@@ -238,7 +238,7 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
                 "institutional_details": institutional,
                 "pattern_details": patterns,
                 "sentiment_confidence": 0.0,
-                "sentiment_reasoning": "OpenAI overnight sentiment not evaluated before top-20 filtering.",
+                "sentiment_reasoning": "Gemini overnight sentiment not evaluated before top-20 filtering.",
                 **features,
             }
             row["score"] = final_score(row, base_weights)
@@ -275,12 +275,12 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
         )
 
     sentiment_results = score_overnight_sentiments(top_20)
-    log_event("openai_sentiment_batch", tickers=list(sentiment_results.keys()), calls_made=1)
+    log_event("gemini_sentiment_batch", tickers=list(sentiment_results.keys()), calls_made=1)
     for row in top_20:
         sentiment = sentiment_results.get(row["ticker"], {
             "sentiment": 50.0,
             "confidence": 0.0,
-            "reasoning": "OpenAI sentiment result missing; sentiment score neutral.",
+            "reasoning": "Gemini sentiment result missing; sentiment score neutral.",
         })
         row["news_sentiment"] = sentiment["sentiment"]
         row["sentiment_confidence"] = sentiment["confidence"]
