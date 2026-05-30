@@ -1,13 +1,26 @@
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 import pandas as pd
 
 LOG_FILE = Path("predictions.csv")
 
 
 def log_predictions(rows: list[dict]) -> None:
+    if not rows:
+        print("No predictions to log.")
+        return
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     df = pd.DataFrame(rows)
-    df.insert(0, "date", datetime.utcnow().strftime("%Y-%m-%d"))
+    df.insert(0, "date", today)
+
+    cols = [
+        "date", "ticker", "price", "score",
+        "momentum", "trend", "anomaly", "mean_reversion",
+        "suggested_qty"
+    ]
+    df = df[[c for c in cols if c in df.columns]]
+
     header = not LOG_FILE.exists()
     df.to_csv(LOG_FILE, mode="a", header=header, index=False)
-    print(f"Logged {len(rows)} predictions to {LOG_FILE}")
+    print(f"Logged {len(rows)} predictions.")

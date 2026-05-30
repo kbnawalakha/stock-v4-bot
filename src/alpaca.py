@@ -3,12 +3,18 @@ import requests
 
 
 def paper_buy(ticker: str, qty: int) -> dict:
+    enabled = os.getenv("ENABLE_PAPER_TRADING", "false").lower() == "true"
+
+    if not enabled:
+        print(f"Paper trade skipped for {ticker}: ENABLE_PAPER_TRADING is not true.")
+        return {"skipped": True, "reason": "paper_trading_disabled"}
+
     base = os.getenv("ALPACA_BASE_URL")
     key = os.getenv("ALPACA_KEY")
     secret = os.getenv("ALPACA_SECRET")
 
     if not base or not key or not secret:
-        print(f"Alpaca skipped: credentials missing for {ticker}.")
+        print(f"Paper trade skipped for {ticker}: Alpaca credentials missing.")
         return {"skipped": True, "reason": "missing_credentials"}
 
     if qty <= 0:

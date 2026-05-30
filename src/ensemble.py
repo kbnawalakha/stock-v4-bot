@@ -1,19 +1,12 @@
-DEFAULT_WEIGHTS = {
-    "momentum": 0.35,
-    "trend": 0.30,
-    "anomaly": 0.20,
-    "mean_reversion": 0.15,
-}
+from config import STRATEGY_WEIGHTS
 
 
-def ensemble_score(strategy_scores: dict, weights: dict = None) -> float:
-    weights = weights or DEFAULT_WEIGHTS
+def ensemble_score(strategy_scores: dict, weights: dict | None = None) -> float:
+    weights = weights or STRATEGY_WEIGHTS
     total = 0.0
     weight_sum = 0.0
-
     for name, weight in weights.items():
         if name in strategy_scores:
-            total += strategy_scores[name] * weight
-            weight_sum += weight
-
+            total += float(strategy_scores[name]) * float(weight)
+            weight_sum += float(weight)
     return total / weight_sum if weight_sum else 0.0
