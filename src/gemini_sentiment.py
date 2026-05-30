@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import time
 from typing import Any
 
 import requests
@@ -8,7 +9,9 @@ import requests
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "gemini-2.5-flash"
-TIMEOUT_SECONDS = 30
+TIMEOUT_SECONDS = int(os.getenv("GEMINI_TIMEOUT_SECONDS", "120"))
+MAX_ATTEMPTS = int(os.getenv("GEMINI_MAX_ATTEMPTS", "2"))
+BATCH_SIZE = int(os.getenv("GEMINI_BATCH_SIZE", "5"))
 LOG_SNIPPET_CHARS = 1200
 
 
@@ -51,6 +54,20 @@ def score_overnight_sentiments(candidates: list[dict[str, Any]]) -> dict[str, di
         }
 
     model = os.getenv("GEMINI_MODEL") or DEFAULT_MODEL
+    results = dict(defaults)
+    for batch_index, batch in enumerate(_chunks(scored_candidates, BATCH_SIZE), start=1):
+        batch_results = _score_batch(batch, results, model, api_key, batch_index)
+        results.update(batch_results)
+    return results
+
+
+def _score_batch(
+    scored_candidates: list[dict[str, Any]],
+    defaults: dict[str, dict[str, Any]],
+    model: str,
+    api_key: str,
+    batch_index: int,
+) -> dict[str, dict[str, Any]]:
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     prompt = {
         "candidates": scored_candidates,
@@ -97,78 +114,121 @@ def score_overnight_sentiments(candidates: list[dict[str, Any]]) -> dict[str, di
         },
     }
 
-    try:
-        _log_event(
-            "gemini_sentiment_request",
-            model=model,
-            candidate_count=len(scored_candidates),
-            tickers=[candidate["ticker"] for candidate in scored_candidates],
-        )
-        response = requests.post(
-            url,
-            headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
-            json=payload,
-            timeout=TIMEOUT_SECONDS,
-        )
-        if response.status_code >= 400:
+    last_error = "Gemini sentiment request failed; sentiment score neutral."
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
             _log_event(
-                "gemini_sentiment_http_error",
+                "gemini_sentiment_request",
                 model=model,
-                status_code=response.status_code,
-                response_snippet=_safe_snippet(response.text),
+                batch_index=batch_index,
+                attempt=attempt,
+                candidate_count=len(scored_candidates),
+                tickers=[candidate["ticker"] for candidate in scored_candidates],
             )
-            response.raise_for_status()
+            response = requests.post(
+                url,
+                headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
+                json=payload,
+                timeout=TIMEOUT_SECONDS,
+            )
+            if response.status_code >= 400:
+                _log_event(
+                    "gemini_sentiment_http_error",
+                    model=model,
+                    batch_index=batch_index,
+                    attempt=attempt,
+                    status_code=response.status_code,
+                    response_snippet=_safe_snippet(response.text),
+                )
+                response.raise_for_status()
 
-        response_payload = response.json()
-        response_text = _response_text(response_payload)
-        parsed = json.loads(response_text)
-        results = dict(defaults)
-        returned_tickers = []
-        for item in parsed.get("results", []):
-            ticker = str(item.get("ticker", "")).upper()
-            if ticker in results:
-                results[ticker] = _normalize_result(item)
-                returned_tickers.append(ticker)
-        missing_tickers = sorted(set(defaults) - set(returned_tickers))
-        _log_event(
-            "gemini_sentiment_success",
-            model=model,
-            requested_count=len(scored_candidates),
-            returned_count=len(returned_tickers),
-            missing_tickers=missing_tickers,
-        )
-        return results
-    except requests.Timeout as exc:
-        _log_event("gemini_sentiment_timeout", model=model, timeout_seconds=TIMEOUT_SECONDS, error=str(exc))
-    except requests.RequestException as exc:
-        response = getattr(exc, "response", None)
-        _log_event(
-            "gemini_sentiment_request_failed",
-            model=model,
-            status_code=getattr(response, "status_code", None),
-            response_snippet=_safe_snippet(getattr(response, "text", "")),
-            error=str(exc),
-        )
-    except json.JSONDecodeError as exc:
-        _log_event(
-            "gemini_sentiment_json_parse_failed",
-            model=model,
-            error=str(exc),
-            response_text_snippet=_safe_snippet(locals().get("response_text", "")),
-        )
-    except ValueError as exc:
-        _log_event(
-            "gemini_sentiment_response_shape_failed",
-            model=model,
-            error=str(exc),
-            response_payload_snippet=_safe_snippet(json.dumps(locals().get("response_payload", {}), default=str)),
-        )
-    except Exception as exc:
-        _log_event("gemini_sentiment_unexpected_failed", model=model, error=str(exc), error_type=type(exc).__name__)
+            response_payload = response.json()
+            response_text = _response_text(response_payload)
+            parsed = json.loads(response_text)
+            results = {}
+            returned_tickers = []
+            requested_tickers = {candidate["ticker"] for candidate in scored_candidates}
+            for item in parsed.get("results", []):
+                ticker = str(item.get("ticker", "")).upper()
+                if ticker in requested_tickers:
+                    results[ticker] = _normalize_result(item)
+                    returned_tickers.append(ticker)
+            missing_tickers = sorted(requested_tickers - set(returned_tickers))
+            _log_event(
+                "gemini_sentiment_success",
+                model=model,
+                batch_index=batch_index,
+                attempt=attempt,
+                requested_count=len(scored_candidates),
+                returned_count=len(returned_tickers),
+                missing_tickers=missing_tickers,
+            )
+            for ticker in missing_tickers:
+                results[ticker] = _default_result("Gemini sentiment result missing; sentiment score neutral.")
+            return results
+        except requests.Timeout as exc:
+            last_error = "Gemini sentiment request timed out; sentiment score neutral."
+            _log_event(
+                "gemini_sentiment_timeout",
+                model=model,
+                batch_index=batch_index,
+                attempt=attempt,
+                timeout_seconds=TIMEOUT_SECONDS,
+                error=str(exc),
+            )
+        except requests.RequestException as exc:
+            last_error = "Gemini sentiment request failed; sentiment score neutral."
+            response = getattr(exc, "response", None)
+            _log_event(
+                "gemini_sentiment_request_failed",
+                model=model,
+                batch_index=batch_index,
+                attempt=attempt,
+                status_code=getattr(response, "status_code", None),
+                response_snippet=_safe_snippet(getattr(response, "text", "")),
+                error=str(exc),
+            )
+        except json.JSONDecodeError as exc:
+            last_error = "Gemini sentiment JSON parse failed; sentiment score neutral."
+            _log_event(
+                "gemini_sentiment_json_parse_failed",
+                model=model,
+                batch_index=batch_index,
+                attempt=attempt,
+                error=str(exc),
+                response_text_snippet=_safe_snippet(locals().get("response_text", "")),
+            )
+        except ValueError as exc:
+            last_error = "Gemini sentiment response shape failed; sentiment score neutral."
+            _log_event(
+                "gemini_sentiment_response_shape_failed",
+                model=model,
+                batch_index=batch_index,
+                attempt=attempt,
+                error=str(exc),
+                response_payload_snippet=_safe_snippet(json.dumps(locals().get("response_payload", {}), default=str)),
+            )
+        except Exception as exc:
+            last_error = "Gemini sentiment request failed unexpectedly; sentiment score neutral."
+            _log_event(
+                "gemini_sentiment_unexpected_failed",
+                model=model,
+                batch_index=batch_index,
+                attempt=attempt,
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
 
+        if attempt < MAX_ATTEMPTS:
+            sleep_seconds = min(2 ** attempt, 8)
+            _log_event("gemini_sentiment_retrying", model=model, batch_index=batch_index, next_attempt=attempt + 1, sleep_seconds=sleep_seconds)
+            time.sleep(sleep_seconds)
+
+    tickers = [candidate["ticker"] for candidate in scored_candidates]
+    _log_event("gemini_sentiment_batch_failed", model=model, batch_index=batch_index, tickers=tickers, error=last_error)
     return {
-        ticker: _default_result("Gemini sentiment request failed; sentiment score neutral.")
-        for ticker in defaults
+        ticker: _default_result(last_error)
+        for ticker in tickers
     }
 
 
@@ -197,3 +257,9 @@ def _safe_snippet(value: str | None) -> str:
 
 def _log_event(event: str, **payload: Any) -> None:
     logger.warning(json.dumps({"event": event, **payload}, default=str))
+
+
+def _chunks(items: list[dict[str, Any]], size: int):
+    size = max(1, size)
+    for start in range(0, len(items), size):
+        yield items[start:start + size]

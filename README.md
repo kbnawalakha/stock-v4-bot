@@ -28,5 +28,8 @@ Optional:
 - POLITICIAN_TRADE_API_KEY
 - FINNHUB_MAX_CALLS_PER_MINUTE defaults to 60
 - GEMINI_MODEL defaults to gemini-2.5-flash
+- GEMINI_TIMEOUT_SECONDS defaults to 120
+- GEMINI_MAX_ATTEMPTS defaults to 2
+- GEMINI_BATCH_SIZE defaults to 5
 
 The politician-trade module has safe fallback behavior. If no API is configured, it still checks public web sources and keyword-based geopolitical catalysts.
