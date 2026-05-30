@@ -1,97 +1,147 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from config import UNIVERSE, TOP_N
+from config import UNIVERSE, TOP_N, UNDER_30_N, EARNINGS_N, SECTOR_ETF_MAP
 from market_data import get_history
-from strategies import score_all_strategies
-from ensemble import ensemble_score
-from benchmarks import benchmark_returns
+from indicators import (
+    pct_return,
+    trend_score,
+    relative_strength_score,
+    sector_strength_score,
+    breakout_score,
+    risk_quality_score,
+)
+from news_catalyst import news_catalyst_score
+from earnings import days_until_earnings, earnings_proximity_score
+from scoring import final_score, earnings_setup_score
+from reasons import why_buy
 from performance import log_predictions
-from portfolio import load_portfolio
-from risk import suggested_qty
 from emailer import send_email
 
 
-def analyze_ticker(ticker: str) -> dict | None:
-    df = get_history(ticker)
-    if df.empty or len(df) < 60:
-        print(f"Skipping {ticker}: not enough data.")
-        return None
+def analyze_universe():
+    spy_df = get_history("SPY")
+    qqq_df = get_history("QQQ")
 
-    strategy_scores = score_all_strategies(df)
-    score = ensemble_score(strategy_scores)
-    price = float(df["Close"].iloc[-1])
+    sector_cache = {}
+    results = []
 
-    return {
-        "ticker": ticker,
-        "price": price,
-        "score": score,
-        **strategy_scores,
-    }
+    for ticker in UNIVERSE:
+        df = get_history(ticker)
+        if df.empty or len(df) < 120:
+            print(f"Skipping {ticker}: not enough data.")
+            continue
+
+        sector_ticker = SECTOR_ETF_MAP.get(ticker, "SPY")
+        if sector_ticker not in sector_cache:
+            sector_cache[sector_ticker] = get_history(sector_ticker)
+
+        news_score, catalysts = news_catalyst_score(ticker)
+        dte = days_until_earnings(ticker)
+
+        features = {
+            "trend": trend_score(df),
+            "relative_strength": relative_strength_score(df, spy_df, qqq_df),
+            "sector_strength": sector_strength_score(sector_cache[sector_ticker], spy_df),
+            "breakout": breakout_score(df),
+            "news_catalyst": news_score,
+            "risk_quality": risk_quality_score(df),
+            "earnings_proximity": earnings_proximity_score(dte),
+        }
+
+        score = final_score(features)
+
+        row = {
+            "ticker": ticker,
+            "price": float(df["Close"].iloc[-1]),
+            "score": score,
+            "days_to_earnings": dte,
+            "catalysts": catalysts,
+            **features,
+        }
+        row["earnings_score"] = earnings_setup_score(row)
+        results.append(row)
+
+    return sorted(results, key=lambda x: x["score"], reverse=True), spy_df, qqq_df
 
 
-def market_regime(benchmarks: dict) -> str:
-    qqq_20 = benchmarks.get("QQQ", {}).get("20d", 0)
-    spy_20 = benchmarks.get("SPY", {}).get("20d", 0)
-    avg = (qqq_20 + spy_20) / 2
+def html_table(title, rows, earnings=False):
+    html = f"""
+    <h2 style="margin-top:28px;border-bottom:2px solid #222;padding-bottom:6px;">{title}</h2>
+    <table width="100%" cellpadding="8" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px;">
+      <tr style="background:#f2f2f2;">
+        <th align="left" style="border:1px solid #ddd;">Ticker</th>
+        <th align="left" style="border:1px solid #ddd;">Why buy this?</th>
+      </tr>
+    """
+    if not rows:
+        html += '<tr><td style="border:1px solid #ddd;">None</td><td style="border:1px solid #ddd;">No matching setups today.</td></tr>'
+    for r in rows:
+        ticker_cell = f"<b>{r['ticker']}</b><br><span style='color:#666;'>${r['price']:.2f} | Score {r['score']:.1f}</span>"
+        if earnings:
+            ticker_cell = f"<b>{r['ticker']}</b><br><span style='color:#666;'>${r['price']:.2f} | Earnings score {r['earnings_score']:.1f}</span>"
+        html += f"""
+        <tr>
+          <td style="border:1px solid #ddd;vertical-align:top;width:28%;">{ticker_cell}</td>
+          <td style="border:1px solid #ddd;vertical-align:top;">{why_buy(r, is_earnings=earnings)}</td>
+        </tr>
+        """
+    html += "</table>"
+    return html
 
-    if avg > 3:
-        return "Risk-on"
-    if avg < -3:
-        return "Risk-off"
-    return "Neutral"
 
-
-def build_report(results: list[dict], benchmarks: dict) -> str:
+def build_email(results, spy_df, qqq_df):
     now_pt = datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%Y-%m-%d %I:%M %p %Z")
+    spy_20 = pct_return(spy_df, 20)
+    qqq_20 = pct_return(qqq_df, 20)
 
-    lines = []
-    lines.append("Daily Stock Signal Report")
-    lines.append(f"Generated: {now_pt}")
-    lines.append("")
-    lines.append(f"Market Regime: {market_regime(benchmarks)}")
-    lines.append("")
-    lines.append("Benchmark comparison:")
-    for ticker, ret in benchmarks.items():
-        lines.append(f"- {ticker}: 1D {ret['1d']:.2f}% | 5D {ret['5d']:.2f}% | 20D {ret['20d']:.2f}%")
+    top_10 = results[:TOP_N]
+    under_30 = [r for r in results if r["price"] < 30][:UNDER_30_N]
+    earnings = sorted(
+        [r for r in results if r.get("days_to_earnings") is not None and 0 <= r["days_to_earnings"] <= 21],
+        key=lambda x: x["earnings_score"],
+        reverse=True,
+    )[:EARNINGS_N]
 
-    lines.append("")
-    lines.append(f"Top {TOP_N} ensemble rankings:")
-    lines.append("")
+    html = f"""
+    <html>
+    <body style="font-family:Arial,sans-serif;color:#111;line-height:1.4;">
+      <h1 style="margin-bottom:4px;">Daily Stock Alpha Report</h1>
+      <p style="margin-top:0;color:#666;">Generated: {now_pt}</p>
 
-    for i, row in enumerate(results[:TOP_N], start=1):
-        lines.append(f"{i}. {row['ticker']} | Score {row['score']:.2f} | Price ${row['price']:.2f}")
-        lines.append(
-            f"   Momentum {row['momentum']:.1f} | Trend {row['trend']:.1f} | "
-            f"Anomaly {row['anomaly']:.1f} | MeanRev {row['mean_reversion']:.1f}"
-        )
-        lines.append(f"   Suggested paper qty: {row['suggested_qty']}")
-        lines.append("")
+      <div style="background:#f7f7f7;border:1px solid #ddd;padding:12px;margin:16px 0;">
+        <b>Market snapshot:</b><br>
+        SPY 20D: {spy_20:.2f}% &nbsp; | &nbsp; QQQ 20D: {qqq_20:.2f}%
+      </div>
 
-    lines.append("Important: This is a research signal-ranking system, not financial advice.")
-    return "\n".join(lines)
+      {html_table("Top 10 Stocks", top_10)}
+      {html_table("Top 5 Under $30", under_30)}
+      {html_table("Top 5 Earnings Setups", earnings, earnings=True)}
+
+      <p style="color:#777;font-size:12px;margin-top:28px;">
+        Research only. Not financial advice. These rankings are based on relative strength, sector strength,
+        breakout potential, news/catalysts, and risk quality.
+      </p>
+    </body>
+    </html>
+    """
+
+    text = "Daily Stock Alpha Report\n\n"
+    for title, rows in [("Top 10 Stocks", top_10), ("Top 5 Under $30", under_30), ("Top 5 Earnings Setups", earnings)]:
+        text += f"\n{title}\n"
+        for r in rows:
+            text += f"{r['ticker']}: {why_buy(r, title.endswith('Setups'))}\n"
+
+    return html, text, top_10
 
 
 def main():
-    portfolio = load_portfolio()
-    cash = float(portfolio.get("cash", 100000))
+    results, spy_df, qqq_df = analyze_universe()
+    html, text, top_10 = build_email(results, spy_df, qqq_df)
 
-    results = []
-    for ticker in UNIVERSE:
-        row = analyze_ticker(ticker)
-        if row is None:
-            continue
-        row["suggested_qty"] = suggested_qty(row["price"], row["score"], cash)
-        results.append(row)
-
-    results.sort(key=lambda x: x["score"], reverse=True)
-
-    benchmarks = benchmark_returns()
-    report = build_report(results, benchmarks)
-
-    print(report)
-    log_predictions(results[:TOP_N])
-    send_email("Daily Stock Alpha Report", report)
+    print(text)
+    log_predictions(top_10)
+    send_email("Daily Stock Alpha Report", html, text)
 
 
 if __name__ == "__main__":
