@@ -1,8 +1,12 @@
 import os
+import json
+import logging
 import requests
 from bs4 import BeautifulSoup
 
 CACHE = {}
+logger = logging.getLogger(__name__)
+DEFAULT_CAPITOLTRADES_BASE_URL = "https://www.capitoltrades.com"
 
 
 def _configured_api_score(ticker: str) -> tuple[float, list[str]]:
@@ -43,35 +47,41 @@ def _configured_api_score(ticker: str) -> tuple[float, list[str]]:
 
 
 def _capitol_trades_public_check(ticker: str) -> tuple[float, list[str]]:
-    # This is a lightweight public-page check. It may break if the site changes.
+    # This is a lightweight free public-page check. It may break if the site changes.
     # For reliable production use, configure POLITICIAN_TRADE_API_URL.
     if ticker in CACHE:
         return CACHE[ticker]
 
     try:
-        url = f"https://www.capitoltrades.com/trades?issuer={ticker}"
+        base_url = (os.getenv("CAPITOLTRADES_BASE_URL") or DEFAULT_CAPITOLTRADES_BASE_URL).rstrip("/")
+        url = f"{base_url}/trades?issuer={ticker}"
         resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
         text = resp.text.lower()
 
         if resp.status_code != 200 or ticker.lower() not in text:
             CACHE[ticker] = (0.0, [])
+            _log_capitol_trades(ticker, url, resp.status_code, 0, 0, 0.0)
             return CACHE[ticker]
 
         soup = BeautifulSoup(resp.text, "html.parser")
         page_text = soup.get_text(" ", strip=True).lower()
 
-        buy_hits = page_text.count(" buy ")
-        sell_hits = page_text.count(" sell ")
+        buy_hits = page_text.count(" buy ") + page_text.count(" purchase ")
+        sell_hits = page_text.count(" sell ") + page_text.count(" sale ")
         score = min(buy_hits * 8 - sell_hits * 4, 60)
 
         reasons = []
         if buy_hits > 0:
-            reasons.append("politician trade page shows buy activity")
+            reasons.append("Capitol Trades shows recent politician buy activity")
+        if sell_hits > buy_hits:
+            reasons.append("Capitol Trades shows more recent sell activity than buy activity")
 
         CACHE[ticker] = (float(max(score, -30)), reasons[:2])
+        _log_capitol_trades(ticker, url, resp.status_code, buy_hits, sell_hits, CACHE[ticker][0])
         return CACHE[ticker]
 
-    except Exception:
+    except Exception as exc:
+        logger.warning(json.dumps({"event": "capitol_trades_failed", "ticker": ticker, "error": str(exc)}))
         CACHE[ticker] = (0.0, [])
         return CACHE[ticker]
 
@@ -82,3 +92,15 @@ def politician_trade_score(ticker: str) -> tuple[float, list[str]]:
         return score, reasons
 
     return _capitol_trades_public_check(ticker)
+
+
+def _log_capitol_trades(ticker: str, url: str, status_code: int, buy_hits: int, sell_hits: int, score: float) -> None:
+    logger.info(json.dumps({
+        "event": "capitol_trades_check",
+        "ticker": ticker,
+        "url": url,
+        "status_code": status_code,
+        "buy_hits": buy_hits,
+        "sell_hits": sell_hits,
+        "score": score,
+    }))

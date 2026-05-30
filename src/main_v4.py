@@ -25,7 +25,8 @@ from indicators import (
     risk_quality_score,
 )
 from news_catalyst import news_catalyst_score, get_recent_headlines
-from gemini_sentiment import score_overnight_sentiments
+from gemini_sentiment import analyze_reddit_plays, score_overnight_sentiments
+from reddit_client import extract_reddit_candidates, fetch_reddit_posts
 from opening_activity import opening_activity_score
 from options_flow import options_flow_score
 from institutional import institutional_ownership_score
@@ -173,6 +174,20 @@ def sector_extreme_signals(spy_df, qqq_df) -> list[dict]:
     return sorted(signals, key=lambda x: x["score"], reverse=True)[:5]
 
 
+def reddit_related_plays() -> list[dict]:
+    posts = fetch_reddit_posts()
+    candidates = extract_reddit_candidates(posts, universe=set(UNIVERSE), limit=12)
+    plays = analyze_reddit_plays(candidates, limit=10)
+    plays = [play for play in plays if play.get("score", 0) >= 35][:5]
+    log_event(
+        "reddit_related_plays",
+        candidate_count=len(candidates),
+        play_count=len(plays),
+        tickers=[play["ticker"] for play in plays],
+    )
+    return plays
+
+
 def analyze_universe(base_weights: dict[str, float] | None = None):
     spy_df = get_history("SPY")
     qqq_df = get_history("QQQ")
@@ -299,7 +314,8 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
         row["catalyst_watch_score"] = catalyst_watch_score(row)
 
     sectors = sector_extreme_signals(spy_df, qqq_df)
-    return sorted(preliminary, key=lambda x: x["score"], reverse=True), spy_df, qqq_df, regime, sectors
+    reddit_plays = reddit_related_plays()
+    return sorted(preliminary, key=lambda x: x["score"], reverse=True), spy_df, qqq_df, regime, sectors, reddit_plays
 
 
 def html_table(title, rows, reason_mode="normal"):
@@ -357,7 +373,36 @@ def html_sector_extremes(rows):
     return html
 
 
-def build_email(results, spy_df, qqq_df, regime, sector_extremes):
+def html_reddit_plays(rows):
+    html = """
+    <h2 style="margin-top:28px;border-bottom:2px solid #222;padding-bottom:6px;">Reddit Related Stocks</h2>
+    <table width="100%" cellpadding="8" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px;">
+      <tr style="background:#f2f2f2;">
+        <th align="left" style="border:1px solid #ddd;">Ticker</th>
+        <th align="left" style="border:1px solid #ddd;">Signal</th>
+        <th align="right" style="border:1px solid #ddd;">Strength</th>
+        <th align="left" style="border:1px solid #ddd;">Reason</th>
+      </tr>
+    """
+    if not rows:
+        html += '<tr><td colspan="4" style="border:1px solid #ddd;">No strong Reddit-related stock plays today.</td></tr>'
+
+    for row in rows:
+        subreddits = ", ".join(row.get("subreddits", [])[:3])
+        context = f"<br><span style='color:#666;'>{escape(subreddits)}</span>" if subreddits else ""
+        html += f"""
+        <tr>
+          <td style="border:1px solid #ddd;vertical-align:top;"><b>{escape(row["ticker"])}</b>{context}</td>
+          <td style="border:1px solid #ddd;vertical-align:top;">{escape(row.get("signal", "MIXED"))}</td>
+          <td align="right" style="border:1px solid #ddd;vertical-align:top;">{float(row.get("score", 0)):.0f}</td>
+          <td style="border:1px solid #ddd;vertical-align:top;">{escape(row.get("reasoning", ""))}</td>
+        </tr>
+        """
+    html += "</table>"
+    return html
+
+
+def build_email(results, spy_df, qqq_df, regime, sector_extremes, reddit_plays):
     now_pt = datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%Y-%m-%d %I:%M %p %Z")
     spy_20 = pct_return(spy_df, 20)
     qqq_20 = pct_return(qqq_df, 20)
@@ -395,6 +440,7 @@ def build_email(results, spy_df, qqq_df, regime, sector_extremes):
       </div>
 
       {html_sector_extremes(sector_extremes)}
+      {html_reddit_plays(reddit_plays)}
       {html_table("Top 10 Stocks", top_10)}
       {html_table("Top 5 Under $30", under_30)}
       {html_table("Top 5 Earnings Setups", earnings, reason_mode="earnings")}
@@ -420,6 +466,16 @@ def build_email(results, spy_df, qqq_df, regime, sector_extremes):
     else:
         text += "No extreme sector bull or bear signal today.\n"
 
+    text += "\nReddit Related Stocks\n"
+    if reddit_plays:
+        for play in reddit_plays:
+            text += (
+                f"{play['ticker']} | {play.get('signal', 'MIXED')} | Strength {float(play.get('score', 0)):.0f}\n"
+                f"Reason: {play.get('reasoning', '')}\n"
+            )
+    else:
+        text += "No strong Reddit-related stock plays today.\n"
+
     sections = [
         ("Top 10 Stocks", top_10, "normal"),
         ("Top 5 Under $30", under_30, "normal"),
@@ -441,8 +497,8 @@ def build_email(results, spy_df, qqq_df, regime, sector_extremes):
 def main():
     learned_weights = refresh_learning_state()
     log_event("learned_weights", weights=learned_weights)
-    results, spy_df, qqq_df, regime, sector_extremes = analyze_universe(learned_weights)
-    html, text, top_10 = build_email(results, spy_df, qqq_df, regime, sector_extremes)
+    results, spy_df, qqq_df, regime, sector_extremes, reddit_plays = analyze_universe(learned_weights)
+    html, text, top_10 = build_email(results, spy_df, qqq_df, regime, sector_extremes, reddit_plays)
 
     print(text)
     log_predictions(top_10)
