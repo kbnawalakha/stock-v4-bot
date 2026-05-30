@@ -18,3 +18,13 @@ def earnings_setup_score(row: dict) -> float:
         + row.get("news_catalyst", 0) * 0.20
         + row.get("breakout", 0) * 0.15
     )
+
+
+def catalyst_watch_score(row: dict) -> float:
+    return (
+        row.get("news_catalyst", 0) * 0.35
+        + row.get("political_geo", 0) * 0.25
+        + row.get("politician_trade", 0) * 0.15
+        + row.get("relative_strength", 0) * 0.15
+        + row.get("breakout", 0) * 0.10
+    )

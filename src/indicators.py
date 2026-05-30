@@ -103,7 +103,6 @@ def atr_risk_quality_score(df: pd.DataFrame) -> float:
     atr = tr.rolling(14).mean().iloc[-1]
     price = close.iloc[-1]
     atr_pct = atr / price * 100 if price else 10
-    # Lower ATR% = cleaner risk. Penalize very wild stocks.
     return clamp(100 - atr_pct * 12, 0, 100)
 
 

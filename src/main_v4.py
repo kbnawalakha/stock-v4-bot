@@ -1,7 +1,7 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from config import UNIVERSE, TOP_N, UNDER_30_N, EARNINGS_N, SECTOR_ETF_MAP
+from config import UNIVERSE, TOP_N, UNDER_30_N, EARNINGS_N, CATALYST_N, POLITICAL_N, SECTOR_ETF_MAP
 from market_data import get_history
 from indicators import (
     pct_return,
@@ -11,9 +11,11 @@ from indicators import (
     breakout_score,
     risk_quality_score,
 )
-from news_catalyst import news_catalyst_score
+from news_catalyst import news_catalyst_score, get_recent_headlines
+from political_geo import political_geo_score
+from politician_trades import politician_trade_score
 from earnings import days_until_earnings, earnings_proximity_score
-from scoring import final_score, earnings_setup_score
+from scoring import final_score, earnings_setup_score, catalyst_watch_score
 from reasons import why_buy
 from performance import log_predictions
 from emailer import send_email
@@ -22,7 +24,6 @@ from emailer import send_email
 def analyze_universe():
     spy_df = get_history("SPY")
     qqq_df = get_history("QQQ")
-
     sector_cache = {}
     results = []
 
@@ -36,7 +37,10 @@ def analyze_universe():
         if sector_ticker not in sector_cache:
             sector_cache[sector_ticker] = get_history(sector_ticker)
 
-        news_score, catalysts = news_catalyst_score(ticker)
+        news_score, catalysts, has_catalyst = news_catalyst_score(ticker)
+        headlines = get_recent_headlines(ticker)
+        pg_score, pg_reasons = political_geo_score(ticker, headlines)
+        pol_score, pol_reasons = politician_trade_score(ticker)
         dte = days_until_earnings(ticker)
 
         features = {
@@ -45,27 +49,31 @@ def analyze_universe():
             "sector_strength": sector_strength_score(sector_cache[sector_ticker], spy_df),
             "breakout": breakout_score(df),
             "news_catalyst": news_score,
+            "political_geo": pg_score,
+            "politician_trade": pol_score,
             "risk_quality": risk_quality_score(df),
             "earnings_proximity": earnings_proximity_score(dte),
         }
 
-        score = final_score(features)
-
         row = {
             "ticker": ticker,
             "price": float(df["Close"].iloc[-1]),
-            "score": score,
             "days_to_earnings": dte,
             "catalysts": catalysts,
+            "has_catalyst": has_catalyst,
+            "political_reasons": pg_reasons,
+            "politician_reasons": pol_reasons,
             **features,
         }
+        row["score"] = final_score(row)
         row["earnings_score"] = earnings_setup_score(row)
+        row["catalyst_watch_score"] = catalyst_watch_score(row)
         results.append(row)
 
     return sorted(results, key=lambda x: x["score"], reverse=True), spy_df, qqq_df
 
 
-def html_table(title, rows, earnings=False):
+def html_table(title, rows, reason_mode="normal"):
     html = f"""
     <h2 style="margin-top:28px;border-bottom:2px solid #222;padding-bottom:6px;">{title}</h2>
     <table width="100%" cellpadding="8" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px;">
@@ -76,14 +84,25 @@ def html_table(title, rows, earnings=False):
     """
     if not rows:
         html += '<tr><td style="border:1px solid #ddd;">None</td><td style="border:1px solid #ddd;">No matching setups today.</td></tr>'
+
     for r in rows:
-        ticker_cell = f"<b>{r['ticker']}</b><br><span style='color:#666;'>${r['price']:.2f} | Score {r['score']:.1f}</span>"
-        if earnings:
-            ticker_cell = f"<b>{r['ticker']}</b><br><span style='color:#666;'>${r['price']:.2f} | Earnings score {r['earnings_score']:.1f}</span>"
+        score_label = f"Score {r['score']:.1f}"
+        if reason_mode == "earnings":
+            score_label = f"Earnings score {r['earnings_score']:.1f}"
+        elif reason_mode in ["catalyst", "political"]:
+            score_label = f"Catalyst score {r['catalyst_watch_score']:.1f}"
+
+        ticker_cell = f"<b>{r['ticker']}</b><br><span style='color:#666;'>${r['price']:.2f} | {score_label}</span>"
+        why = why_buy(
+            r,
+            is_earnings=(reason_mode == "earnings"),
+            is_catalyst=(reason_mode in ["catalyst", "political"]),
+        )
+
         html += f"""
         <tr>
           <td style="border:1px solid #ddd;vertical-align:top;width:28%;">{ticker_cell}</td>
-          <td style="border:1px solid #ddd;vertical-align:top;">{why_buy(r, is_earnings=earnings)}</td>
+          <td style="border:1px solid #ddd;vertical-align:top;">{why}</td>
         </tr>
         """
     html += "</table>"
@@ -103,6 +122,18 @@ def build_email(results, spy_df, qqq_df):
         reverse=True,
     )[:EARNINGS_N]
 
+    catalyst_watch = sorted(
+        [r for r in results if r.get("has_catalyst") or r.get("news_catalyst", 0) >= 30],
+        key=lambda x: x["catalyst_watch_score"],
+        reverse=True,
+    )[:CATALYST_N]
+
+    political_watch = sorted(
+        [r for r in results if r.get("political_geo", 0) >= 20 or r.get("politician_trade", 0) >= 10],
+        key=lambda x: x["catalyst_watch_score"],
+        reverse=True,
+    )[:POLITICAL_N]
+
     html = f"""
     <html>
     <body style="font-family:Arial,sans-serif;color:#111;line-height:1.4;">
@@ -116,21 +147,30 @@ def build_email(results, spy_df, qqq_df):
 
       {html_table("Top 10 Stocks", top_10)}
       {html_table("Top 5 Under $30", under_30)}
-      {html_table("Top 5 Earnings Setups", earnings, earnings=True)}
+      {html_table("Top 5 Earnings Setups", earnings, reason_mode="earnings")}
+      {html_table("Catalyst Watch", catalyst_watch, reason_mode="catalyst")}
+      {html_table("Political / Geopolitical Watch", political_watch, reason_mode="political")}
 
       <p style="color:#777;font-size:12px;margin-top:28px;">
-        Research only. Not financial advice. These rankings are based on relative strength, sector strength,
-        breakout potential, news/catalysts, and risk quality.
+        Research only. Not financial advice. Congressional trade disclosures can be delayed,
+        so politician-trade signals are secondary indicators.
       </p>
     </body>
     </html>
     """
 
     text = "Daily Stock Alpha Report\n\n"
-    for title, rows in [("Top 10 Stocks", top_10), ("Top 5 Under $30", under_30), ("Top 5 Earnings Setups", earnings)]:
+    sections = [
+        ("Top 10 Stocks", top_10, "normal"),
+        ("Top 5 Under $30", under_30, "normal"),
+        ("Top 5 Earnings Setups", earnings, "earnings"),
+        ("Catalyst Watch", catalyst_watch, "catalyst"),
+        ("Political / Geopolitical Watch", political_watch, "political"),
+    ]
+    for title, rows, mode in sections:
         text += f"\n{title}\n"
         for r in rows:
-            text += f"{r['ticker']}: {why_buy(r, title.endswith('Setups'))}\n"
+            text += f"{r['ticker']}: {why_buy(r, mode == 'earnings', mode in ['catalyst', 'political'])}\n"
 
     return html, text, top_10
 

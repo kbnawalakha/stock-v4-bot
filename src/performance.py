@@ -16,7 +16,8 @@ def log_predictions(rows: list[dict]) -> None:
 
     cols = [
         "date", "ticker", "price", "score", "relative_strength", "sector_strength",
-        "breakout", "news_catalyst", "risk_quality", "days_to_earnings"
+        "breakout", "news_catalyst", "political_geo", "politician_trade",
+        "risk_quality", "days_to_earnings", "catalyst_watch_score"
     ]
     df = df[[c for c in cols if c in df.columns]]
 

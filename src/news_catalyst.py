@@ -1,20 +1,27 @@
 import re
 from market_data import get_ticker_obj
 
-
 POSITIVE_WORDS = [
     "beat", "beats", "raise", "raises", "upgrade", "upgraded", "strong", "growth",
     "contract", "partnership", "record", "approval", "launch", "surge", "profit",
-    "guidance", "outperform", "buy rating", "price target", "ai", "semiconductor"
+    "guidance", "outperform", "buy rating", "price target", "ai", "semiconductor",
+    "deal", "expansion", "wins", "award", "order", "demand"
 ]
 
 NEGATIVE_WORDS = [
     "miss", "misses", "cut", "cuts", "downgrade", "downgraded", "weak", "lawsuit",
-    "probe", "delay", "recall", "loss", "warning", "underperform", "sell rating"
+    "probe", "delay", "recall", "loss", "warning", "underperform", "sell rating",
+    "sanction", "ban", "investigation"
+]
+
+CATALYST_WORDS = [
+    "earnings", "guidance", "contract", "upgrade", "approval", "partnership",
+    "launch", "ai", "tariff", "sanctions", "war", "defense", "government",
+    "chips", "semiconductor", "energy", "nuclear", "cybersecurity", "data center"
 ]
 
 
-def get_recent_headlines(ticker: str, limit: int = 6) -> list[str]:
+def get_recent_headlines(ticker: str, limit: int = 8) -> list[str]:
     try:
         obj = get_ticker_obj(ticker)
         news = obj.news or []
@@ -28,24 +35,25 @@ def get_recent_headlines(ticker: str, limit: int = 6) -> list[str]:
         return []
 
 
-def news_catalyst_score(ticker: str) -> tuple[float, list[str]]:
+def news_catalyst_score(ticker: str) -> tuple[float, list[str], bool]:
     headlines = get_recent_headlines(ticker)
     if not headlines:
-        return 0.0, []
+        return 0.0, [], False
 
     joined = " ".join(headlines).lower()
     pos = sum(1 for w in POSITIVE_WORDS if re.search(r"\b" + re.escape(w) + r"\b", joined))
     neg = sum(1 for w in NEGATIVE_WORDS if re.search(r"\b" + re.escape(w) + r"\b", joined))
+    catalyst_hits = sum(1 for w in CATALYST_WORDS if re.search(r"\b" + re.escape(w) + r"\b", joined))
 
-    raw = (pos - neg) * 18
+    raw = (pos - neg) * 16 + catalyst_hits * 8
     score = max(min(raw, 100), -100)
 
     catalysts = []
     for h in headlines:
         hl = h.lower()
-        if any(w in hl for w in POSITIVE_WORDS):
+        if any(w in hl for w in POSITIVE_WORDS + CATALYST_WORDS):
             catalysts.append(h)
         if len(catalysts) >= 2:
             break
 
-    return float(score), catalysts
+    return float(score), catalysts, catalyst_hits > 0

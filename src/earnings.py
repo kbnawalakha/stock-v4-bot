@@ -12,7 +12,6 @@ def days_until_earnings(ticker: str) -> int | None:
 
         idx = dates.index
         now = pd.Timestamp(datetime.now(timezone.utc))
-
         future_dates = []
         for d in idx:
             ts = pd.Timestamp(d)
