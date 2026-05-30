@@ -48,8 +48,6 @@ def upside_reason(row: dict, reason_mode: str = "normal") -> str:
         drivers.append("options flow is leaning bullish")
     if row.get("trend", 0) >= 75:
         drivers.append("the stock remains in a strong trend")
-    if row.get("relative_strength", 0) >= 25:
-        drivers.append("it is outperforming SPY and QQQ")
     if row.get("sector_strength", 0) >= 20:
         drivers.append("its sector is acting well")
     if row.get("breakout", 0) >= 55:
