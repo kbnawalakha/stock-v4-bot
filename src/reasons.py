@@ -11,6 +11,14 @@ def why_buy(row: dict, is_earnings: bool = False, is_catalyst: bool = False) -> 
         reasons.append("strong sector")
     if row.get("breakout", 0) >= 55:
         reasons.append("breakout setup")
+    if row.get("opening_activity", 0) >= 70:
+        reasons.append("positive opening volume spike")
+    if row.get("options_flow", 0) >= 70:
+        reasons.append("bullish options activity")
+    if row.get("earnings", 0) >= 70:
+        reasons.append("positive earnings setup")
+    if row.get("news_sentiment", 0) >= 70:
+        reasons.append("strong overnight news")
     if row.get("news_catalyst", 0) >= 25:
         reasons.append("positive news catalyst")
     if row.get("political_geo", 0) >= 20:

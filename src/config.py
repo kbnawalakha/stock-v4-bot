@@ -14,14 +14,15 @@ CATALYST_N = 7
 POLITICAL_N = 7
 
 STRATEGY_WEIGHTS = {
-    "trend": 0.22,
-    "relative_strength": 0.18,
-    "sector_strength": 0.13,
-    "breakout": 0.13,
-    "news_catalyst": 0.14,
-    "political_geo": 0.10,
-    "politician_trade": 0.04,
-    "risk_quality": 0.06,
+    "opening_activity": 0.20,
+    "news_sentiment": 0.20,
+    "trend": 0.15,
+    "relative_strength": 0.10,
+    "sector_strength": 0.10,
+    "options_flow": 0.10,
+    "earnings": 0.10,
+    "political_geo": 0.03,
+    "politician_trade": 0.02,
 }
 
 BENCHMARKS = ["SPY", "QQQ"]

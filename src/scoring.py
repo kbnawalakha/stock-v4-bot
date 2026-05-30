@@ -1,10 +1,26 @@
 from config import STRATEGY_WEIGHTS
 
 
-def final_score(features: dict) -> float:
+def regime_adjusted_weights(regime: str | None) -> dict[str, float]:
+    weights = dict(STRATEGY_WEIGHTS)
+    if regime == "RISK_ON":
+        weights["trend"] *= 1.25
+        weights["options_flow"] *= 1.25
+    elif regime == "RISK_OFF":
+        weights["news_sentiment"] *= 1.25
+        weights["opening_activity"] *= 1.25
+
+    total = sum(weights.values())
+    if total <= 0:
+        return weights
+    return {key: value / total for key, value in weights.items()}
+
+
+def final_score(features: dict, weights: dict[str, float] | None = None) -> float:
+    active_weights = weights or STRATEGY_WEIGHTS
     total = 0.0
     weight_sum = 0.0
-    for key, weight in STRATEGY_WEIGHTS.items():
+    for key, weight in active_weights.items():
         total += features.get(key, 0.0) * weight
         weight_sum += weight
     return total / weight_sum if weight_sum else 0.0
