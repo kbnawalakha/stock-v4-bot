@@ -24,7 +24,6 @@ from politician_trades import politician_trade_score
 from earnings import earnings_proximity_score, earnings_score
 from market_regime import classify_market_regime
 from scoring import final_score, earnings_setup_score, catalyst_watch_score, regime_adjusted_weights
-from reasons import why_buy
 from performance import log_predictions
 from emailer import send_email
 
@@ -36,24 +35,46 @@ def log_event(event: str, **payload):
     logger.info(json.dumps({"event": event, **payload}, default=str))
 
 
-INDICATOR_COLUMNS = [
-    ("Opening", "opening_activity"),
-    ("News", "news_sentiment"),
-    ("Catalyst", "news_catalyst"),
-    ("Trend", "trend"),
-    ("RS", "relative_strength"),
-    ("Sector", "sector_strength"),
-    ("Breakout", "breakout"),
-    ("Options", "options_flow"),
-    ("Earnings", "earnings"),
-    ("Political", "political_geo"),
-    ("Trade", "politician_trade"),
-    ("Risk", "risk_quality"),
-]
+def upside_reason(row: dict, reason_mode: str = "normal") -> str:
+    drivers = []
+    if row.get("opening_activity", 0) >= 70:
+        drivers.append("buyers showed up early with strong opening activity")
+    elif row.get("opening_activity", 0) >= 55:
+        drivers.append("opening activity is supportive")
 
+    if row.get("news_sentiment", 0) >= 70:
+        drivers.append("overnight news sentiment is bullish")
+    if row.get("options_flow", 0) >= 70:
+        drivers.append("options flow is leaning bullish")
+    if row.get("trend", 0) >= 75:
+        drivers.append("the stock remains in a strong trend")
+    if row.get("relative_strength", 0) >= 25:
+        drivers.append("it is outperforming SPY and QQQ")
+    if row.get("sector_strength", 0) >= 20:
+        drivers.append("its sector is acting well")
+    if row.get("breakout", 0) >= 55:
+        drivers.append("the chart has a breakout setup")
+    if row.get("earnings", 0) >= 70:
+        drivers.append("earnings data is supportive")
+    if row.get("political_geo", 0) >= 20:
+        drivers.append("there is a political or geopolitical tailwind")
+    if row.get("politician_trade", 0) >= 10:
+        drivers.append("politician-trade activity is supportive")
 
-def indicator_text(row: dict) -> str:
-    return " | ".join(f"{label} {row.get(key, 0):.0f}" for label, key in INDICATOR_COLUMNS)
+    if reason_mode in ["catalyst", "political"] and row.get("catalysts"):
+        catalyst = row["catalysts"][0]
+        drivers.insert(0, f'a fresh catalyst is in play: "{catalyst}"')
+    elif reason_mode == "earnings" and row.get("days_to_earnings") is not None:
+        drivers.insert(0, f"earnings are coming in {row['days_to_earnings']} days")
+
+    if not drivers:
+        drivers.append("it has one of the best combined setups in today's model")
+
+    reason = f"{row['ticker']} has upside potential because " + ", ".join(drivers[:3]) + "."
+    sentiment_reason = row.get("sentiment_reasoning")
+    if sentiment_reason and row.get("sentiment_confidence", 0) > 0:
+        reason += f" OpenAI sentiment note: {sentiment_reason}"
+    return reason
 
 
 def analyze_universe():
@@ -159,51 +180,27 @@ def analyze_universe():
 
 
 def html_table(title, rows, reason_mode="normal"):
-    indicator_headers = "\n".join(
-        f'<th align="right" style="border:1px solid #ddd;">{label}</th>'
-        for label, _ in INDICATOR_COLUMNS
-    )
     html = f"""
     <h2 style="margin-top:28px;border-bottom:2px solid #222;padding-bottom:6px;">{title}</h2>
-    <table width="100%" cellpadding="6" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:12px;">
+    <table width="100%" cellpadding="8" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px;">
       <tr style="background:#f2f2f2;">
         <th align="left" style="border:1px solid #ddd;">Ticker</th>
-        {indicator_headers}
-        <th align="left" style="border:1px solid #ddd;">Regime</th>
-        <th align="left" style="border:1px solid #ddd;">Why buy this?</th>
+        <th align="right" style="border:1px solid #ddd;">Opening</th>
+        <th align="left" style="border:1px solid #ddd;">Reason</th>
       </tr>
     """
     if not rows:
-        colspan = len(INDICATOR_COLUMNS) + 3
-        html += f'<tr><td colspan="{colspan}" style="border:1px solid #ddd;">No matching setups today.</td></tr>'
+        html += '<tr><td colspan="3" style="border:1px solid #ddd;">No matching setups today.</td></tr>'
 
     for r in rows:
-        score_label = f"Score {r['score']:.1f}"
-        if reason_mode == "earnings":
-            score_label = f"Earnings score {r['earnings_score']:.1f}"
-        elif reason_mode in ["catalyst", "political"]:
-            score_label = f"Catalyst score {r['catalyst_watch_score']:.1f}"
-
-        ticker_cell = f"<b>{r['ticker']}</b><br><span style='color:#666;'>${r['price']:.2f} | {score_label}</span>"
-        why = why_buy(
-            r,
-            is_earnings=(reason_mode == "earnings"),
-            is_catalyst=(reason_mode in ["catalyst", "political"]),
-        )
-        sentiment_reason = r.get("sentiment_reasoning")
-        if sentiment_reason and reason_mode == "normal":
-            why += f"<br><span style='color:#555;'>OpenAI: {escape(sentiment_reason)}</span>"
-        indicator_cells = "\n".join(
-            f'<td align="right" style="border:1px solid #ddd;vertical-align:top;">{r.get(key, 0):.0f}</td>'
-            for _, key in INDICATOR_COLUMNS
-        )
+        ticker_cell = f"<b>{r['ticker']}</b><br><span style='color:#666;'>${r['price']:.2f}</span>"
+        reason = escape(upside_reason(r, reason_mode))
 
         html += f"""
         <tr>
-          <td style="border:1px solid #ddd;vertical-align:top;width:16%;">{ticker_cell}</td>
-          {indicator_cells}
-          <td style="border:1px solid #ddd;vertical-align:top;">{r.get('regime', 'NEUTRAL')}</td>
-          <td style="border:1px solid #ddd;vertical-align:top;">{why}</td>
+          <td style="border:1px solid #ddd;vertical-align:top;width:18%;">{ticker_cell}</td>
+          <td align="right" style="border:1px solid #ddd;vertical-align:top;width:12%;">{r.get('opening_activity', 0):.0f}</td>
+          <td style="border:1px solid #ddd;vertical-align:top;">{reason}</td>
         </tr>
         """
     html += "</table>"
@@ -273,11 +270,9 @@ def build_email(results, spy_df, qqq_df, regime):
         text += f"\n{title}\n"
         for r in rows:
             text += (
-                f"{r['ticker']} Score: {r['score']:.1f} | {indicator_text(r)} | Regime {r.get('regime', 'NEUTRAL')}\n"
-                f"Drivers: {why_buy(r, mode == 'earnings', mode in ['catalyst', 'political'])}\n"
+                f"{r['ticker']} | Opening {r.get('opening_activity', 0):.0f}\n"
+                f"Reason: {upside_reason(r, mode)}\n"
             )
-            if mode == "normal" and r.get("sentiment_reasoning"):
-                text += f"OpenAI: {r['sentiment_reasoning']}\n"
 
     return html, text, top_10
 
