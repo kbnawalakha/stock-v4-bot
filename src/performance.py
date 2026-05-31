@@ -15,11 +15,14 @@ def log_predictions(rows: list[dict]) -> None:
     df.insert(0, "date", today)
 
     cols = [
-        "date", "ticker", "price", "score", "opening_activity", "news_sentiment",
+        "date", "ticker", "price", "score", "opportunity_score", "catalyst_score", "quality_score",
+        "opening_activity", "news_sentiment",
         "trend", "relative_strength", "sector_strength", "breakout", "options_flow",
-        "earnings", "institutional_ownership", "pattern_trading", "news_catalyst",
+        "earnings", "earnings_quality", "analyst_revisions", "fundamental_momentum",
+        "volume_accumulation", "short_squeeze", "insider_buying", "volatility_setup",
+        "etf_flow_exposure", "institutional_ownership", "pattern_trading", "news_catalyst",
         "political_geo", "politician_trade", "risk_quality", "days_to_earnings",
-        "regime", "sentiment_confidence", "catalyst_watch_score"
+        "regime", "market_breadth_regime", "market_breadth_score", "sentiment_confidence", "catalyst_watch_score"
     ]
     df = df[[c for c in cols if c in df.columns]]
 

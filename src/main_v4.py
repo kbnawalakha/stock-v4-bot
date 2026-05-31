@@ -1,6 +1,7 @@
 from datetime import datetime
 import json
 import logging
+import os
 from html import escape
 from zoneinfo import ZoneInfo
 
@@ -11,11 +12,19 @@ from config import (
     EARNINGS_N,
     CATALYST_N,
     POLITICAL_N,
+    MIN_PRICE,
+    MIN_AVG_DAILY_VOLUME,
     SECTOR_ETF_MAP,
     SECTOR_LABELS,
 )
+from analyst_revisions import analyst_revision_score
+from etf_flow import etf_flow_exposure_score
 from finnhub_client import get_finnhub_client
+from fundamentals_momentum import fundamental_momentum_score
+from insider_buying import insider_buying_score
+from institutional_change import institutional_change_score
 from market_data import get_history
+from market_breadth import market_breadth_regime
 from indicators import (
     pct_return,
     trend_score,
@@ -35,13 +44,25 @@ from political_geo import political_geo_score
 from politician_trades import politician_trade_score
 from earnings import earnings_proximity_score, earnings_score
 from market_regime import classify_market_regime
-from scoring import final_score, earnings_setup_score, catalyst_watch_score, regime_adjusted_weights
+from scoring import (
+    apply_reddit_blend,
+    catalyst_watch_score,
+    earnings_setup_score,
+    regime_adjusted_weights,
+    staged_final_score,
+)
+from short_squeeze import short_squeeze_score
+from signal_utils import signed_to_percent
+from volatility_setup import volatility_setup_score
+from volume_accumulation import volume_accumulation_score
 from learning import refresh_learning_state
 from performance import log_predictions
 from emailer import send_email
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
+
+OPTIONAL_API_ENVS = ["FMP_API_KEY", "ALPHA_VANTAGE_API_KEY", "SEC_USER_AGENT", "FINNHUB_API_KEY", "GEMINI_API_KEY"]
 
 
 def log_event(event: str, **payload):
@@ -67,6 +88,8 @@ def upside_reason(row: dict, reason_mode: str = "normal") -> str:
             drivers.append("daily and weekly trading patterns are constructive")
     if row.get("institutional_ownership", 0) >= 70:
         drivers.append(row.get("institutional_details", {}).get("reason", "institutional ownership is supportive"))
+    if row.get("etf_flow_exposure", 50) >= 70:
+        drivers.append(row.get("etf_flow_details", {}).get("reason", "sector ETF flow exposure is supportive"))
     if row.get("trend", 0) >= 75:
         drivers.append("the stock remains in a strong trend")
     if row.get("sector_strength", 0) >= 20:
@@ -94,6 +117,44 @@ def upside_reason(row: dict, reason_mode: str = "normal") -> str:
     if sentiment_reason and row.get("sentiment_confidence", 0) > 0:
         reason += f" Gemini sentiment note: {sentiment_reason}"
     return reason
+
+
+def top_drivers(row: dict) -> list[str]:
+    candidates = []
+    checks = [
+        ("opening_activity", "strong opening activity"),
+        ("news_sentiment", "bullish news sentiment"),
+        ("options_flow", "bullish options flow"),
+        ("volume_accumulation", "accumulation on volume"),
+        ("volatility_setup", "constructive volatility setup"),
+        ("earnings_quality", "supportive earnings quality"),
+        ("analyst_revisions", "positive analyst revisions"),
+        ("fundamental_momentum", "improving fundamentals"),
+        ("insider_buying", "insider buying signal"),
+        ("institutional_ownership", "institutional support"),
+        ("pattern_trading", "constructive trading pattern"),
+        ("etf_flow_exposure", "supportive sector ETF flow proxy"),
+    ]
+    for key, label in checks:
+        value = float(row.get(key, 50.0))
+        if value >= 65:
+            candidates.append((value, label))
+    return [label for _, label in sorted(candidates, reverse=True)[:3]] or ["balanced multi-factor setup"]
+
+
+def top_risks(row: dict) -> list[str]:
+    risks = []
+    if row.get("liquidity_score", 100) < 60:
+        risks.append("liquidity is thinner than preferred")
+    if row.get("risk_quality", 100) < 45:
+        risks.append("volatility/risk quality is weak")
+    if row.get("earnings_quality", 50) < 40:
+        risks.append("earnings quality is soft")
+    if row.get("analyst_revisions", 50) < 40:
+        risks.append("analyst revisions are negative")
+    if row.get("news_sentiment", 50) < 45:
+        risks.append("news sentiment is not supportive")
+    return risks[:2] or ["no major model risk flagged"]
 
 
 def sector_extreme_signals(spy_df, qqq_df) -> list[dict]:
@@ -188,22 +249,53 @@ def reddit_related_plays() -> list[dict]:
     return plays
 
 
+def quality_liquidity_filter(ticker: str, df) -> tuple[bool, dict]:
+    include_high_risk = os.getenv("INCLUDE_HIGH_RISK_MICROCAPS", "false").lower() == "true"
+    if df.empty or len(df) < 120:
+        return False, {"reason": "not enough price history", "liquidity_score": 0.0}
+
+    price = float(df["Close"].iloc[-1])
+    avg_volume = float(df["Volume"].tail(30).mean())
+    min_price = float(os.getenv("MIN_STOCK_PRICE", MIN_PRICE))
+    min_volume = float(os.getenv("MIN_AVG_DAILY_VOLUME", MIN_AVG_DAILY_VOLUME))
+    price_ok = price > min_price
+    volume_ok = avg_volume > min_volume
+    extreme_penny = price < 2 or avg_volume < 150_000
+    passed = (price_ok and volume_ok and not extreme_penny) or include_high_risk
+    price_score = min(100.0, max(0.0, price / min_price * 50)) if min_price > 0 else 50.0
+    volume_score = min(100.0, max(0.0, avg_volume / min_volume * 50)) if min_volume > 0 else 50.0
+    liquidity_score = price_score * 0.35 + volume_score * 0.65
+    reason = "passed quality/liquidity filter" if passed else f"filtered: price ${price:.2f}, avg volume {avg_volume:.0f}"
+    return passed, {
+        "price": price,
+        "avg_daily_volume": avg_volume,
+        "liquidity_score": liquidity_score,
+        "passed_quality_filter": passed,
+        "quality_filter_reason": reason,
+    }
+
+
 def analyze_universe(base_weights: dict[str, float] | None = None):
     spy_df = get_history("SPY")
     qqq_df = get_history("QQQ")
     sector_cache = {}
+    universe_price_data = {}
     results = []
+    missing_api_warnings = [name for name in OPTIONAL_API_ENVS if not os.getenv(name)]
 
     for ticker in UNIVERSE:
         try:
             df = get_history(ticker)
-            if df.empty or len(df) < 120:
-                print(f"Skipping {ticker}: not enough data.")
+            universe_price_data[ticker] = df
+            passed_quality, quality_details = quality_liquidity_filter(ticker, df)
+            if not passed_quality:
+                log_event("quality_filter_excluded", ticker=ticker, **quality_details)
                 continue
 
             sector_ticker = SECTOR_ETF_MAP.get(ticker, "SPY")
             if sector_ticker not in sector_cache:
                 sector_cache[sector_ticker] = get_history(sector_ticker)
+            sector_df = sector_cache[sector_ticker]
 
             news_score, catalysts, has_catalyst = news_catalyst_score(ticker)
             headlines = get_recent_headlines(ticker)
@@ -212,18 +304,32 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
             opening = opening_activity_score(ticker)
             earnings = earnings_score(ticker)
             options = options_flow_score(ticker)
-            institutional = institutional_ownership_score(ticker)
+            institutional = institutional_change_score(ticker)
             patterns = pattern_trading_score(df)
+            analyst = analyst_revision_score(ticker)
+            fundamentals = fundamental_momentum_score(ticker)
+            volume = volume_accumulation_score(ticker, df)
+            squeeze = short_squeeze_score(ticker)
+            insider = insider_buying_score(ticker)
+            volatility = volatility_setup_score(ticker, df)
+            etf_flow = etf_flow_exposure_score(ticker, sector_ticker, sector_df)
             log_event("opening_activity_score", ticker=ticker, **opening)
             log_event("earnings_score", ticker=ticker, **earnings)
             log_event("options_score", ticker=ticker, **options)
             log_event("institutional_score", ticker=ticker, **institutional)
             log_event("pattern_trading_score", ticker=ticker, **patterns)
+            log_event("analyst_revision_score", ticker=ticker, **analyst)
+            log_event("fundamental_momentum_score", ticker=ticker, **fundamentals)
+            log_event("volume_accumulation_score", ticker=ticker, **volume)
+            log_event("short_squeeze_score", ticker=ticker, **squeeze)
+            log_event("insider_buying_score", ticker=ticker, **insider)
+            log_event("volatility_setup_score", ticker=ticker, **volatility)
+            log_event("etf_flow_exposure_score", ticker=ticker, **etf_flow)
 
             features = {
                 "trend": trend_score(df),
                 "relative_strength": relative_strength_score(df, spy_df, qqq_df),
-                "sector_strength": sector_strength_score(sector_cache[sector_ticker], spy_df),
+                "sector_strength": sector_strength_score(sector_df, spy_df),
                 "breakout": breakout_score(df),
                 "news_catalyst": news_score,
                 "news_sentiment": max(0.0, min(100.0, 50.0 + news_score / 2)),
@@ -232,15 +338,23 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
                 "risk_quality": risk_quality_score(df),
                 "opening_activity": opening["score"],
                 "earnings": earnings["score"],
+                "earnings_quality": earnings["score"],
                 "options_flow": options["score"],
                 "institutional_ownership": institutional["score"],
                 "pattern_trading": patterns["score"],
                 "earnings_proximity": earnings_proximity_score(earnings.get("days_to_earnings")),
+                "analyst_revisions": signed_to_percent(analyst["score"]),
+                "fundamental_momentum": signed_to_percent(fundamentals["score"]),
+                "volume_accumulation": volume["score"],
+                "short_squeeze": squeeze["score"],
+                "insider_buying": signed_to_percent(insider["score"]),
+                "volatility_setup": volatility["score"],
+                "etf_flow_exposure": etf_flow["score"],
+                "liquidity_score": quality_details["liquidity_score"],
             }
 
             row = {
                 "ticker": ticker,
-                "price": float(df["Close"].iloc[-1]),
                 "days_to_earnings": earnings.get("days_to_earnings"),
                 "catalysts": catalysts,
                 "headlines": headlines,
@@ -252,11 +366,21 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
                 "options_details": options,
                 "institutional_details": institutional,
                 "pattern_details": patterns,
+                "analyst_details": analyst,
+                "fundamental_details": fundamentals,
+                "volume_details": volume,
+                "short_squeeze_details": squeeze,
+                "insider_details": insider,
+                "volatility_details": volatility,
+                "etf_flow_details": etf_flow,
                 "sentiment_confidence": 0.0,
                 "sentiment_reasoning": "Gemini overnight sentiment not evaluated before top-20 filtering.",
+                "data_freshness": datetime.now(ZoneInfo("America/Los_Angeles")).isoformat(),
+                "missing_data_warning": ", ".join(missing_api_warnings) if missing_api_warnings else "",
+                **quality_details,
                 **features,
             }
-            row["score"] = final_score(row, base_weights)
+            row["score"] = staged_final_score(row, weights=base_weights)
             row["earnings_score"] = earnings_setup_score(row)
             row["catalyst_watch_score"] = catalyst_watch_score(row)
             results.append(row)
@@ -267,6 +391,9 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
                 opening=row["opening_activity"],
                 options=row["options_flow"],
                 earnings=row["earnings"],
+                opportunity=row["opportunity_score"],
+                catalyst=row["catalyst_score"],
+                quality=row["quality_score"],
             )
         except Exception as exc:
             log_event("ticker_failed", ticker=ticker, error=str(exc))
@@ -302,19 +429,28 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
         row["sentiment_reasoning"] = sentiment["reasoning"]
         log_event("sentiment_score", ticker=row["ticker"], **sentiment)
 
-    regime = classify_market_regime()
+    breadth = market_breadth_regime(universe_price_data)
+    regime = classify_market_regime(breadth)
     weights = regime_adjusted_weights(str(regime["regime"]), base_weights)
+    reddit_plays = reddit_related_plays()
+    reddit_by_ticker = {play["ticker"]: play for play in reddit_plays}
+    blend_reddit = os.getenv("BLEND_REDDIT_IN_MAIN_SCORE", "false").lower() == "true"
+    log_event("market_breadth", **breadth)
     log_event("regime", **regime, learned_base_weights=base_weights, weights=weights)
 
     for row in preliminary:
         row["regime"] = regime["regime"]
         row["regime_confidence"] = regime["confidence"]
-        row["score"] = final_score(row, weights)
+        row["market_breadth_regime"] = breadth["regime"]
+        row["market_breadth_score"] = breadth["breadth_score"]
+        row["score"] = staged_final_score(row, regime, breadth, weights)
+        row["score"] = apply_reddit_blend(row["score"], row, reddit_by_ticker, blend_reddit)
         row["earnings_score"] = earnings_setup_score(row)
         row["catalyst_watch_score"] = catalyst_watch_score(row)
+        row["top_drivers"] = top_drivers(row)
+        row["top_risks"] = top_risks(row)
 
     sectors = sector_extreme_signals(spy_df, qqq_df)
-    reddit_plays = reddit_related_plays()
     return sorted(preliminary, key=lambda x: x["score"], reverse=True), spy_df, qqq_df, regime, sectors, reddit_plays
 
 
@@ -340,6 +476,46 @@ def html_table(title, rows, reason_mode="normal"):
           <td style="border:1px solid #ddd;vertical-align:top;width:18%;">{ticker_cell}</td>
           <td align="right" style="border:1px solid #ddd;vertical-align:top;width:12%;">{r.get('opening_activity', 0):.0f}</td>
           <td style="border:1px solid #ddd;vertical-align:top;">{reason}</td>
+        </tr>
+        """
+    html += "</table>"
+    return html
+
+
+def html_top10_table(rows):
+    html = """
+    <h2 style="margin-top:28px;border-bottom:2px solid #222;padding-bottom:6px;">Top 10 Stocks</h2>
+    <table width="100%" cellpadding="8" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px;">
+      <tr style="background:#f2f2f2;">
+        <th align="left" style="border:1px solid #ddd;">Ticker</th>
+        <th align="right" style="border:1px solid #ddd;">Score</th>
+        <th align="right" style="border:1px solid #ddd;">Opportunity</th>
+        <th align="right" style="border:1px solid #ddd;">Catalyst</th>
+        <th align="right" style="border:1px solid #ddd;">Quality</th>
+        <th align="left" style="border:1px solid #ddd;">Drivers / Risks</th>
+      </tr>
+    """
+    if not rows:
+        html += '<tr><td colspan="6" style="border:1px solid #ddd;">No matching setups today.</td></tr>'
+
+    for row in rows:
+        drivers = "<br>".join(escape(item) for item in row.get("top_drivers", top_drivers(row))[:3])
+        risks = "<br>".join(escape(item) for item in row.get("top_risks", top_risks(row))[:2])
+        warning = escape(row.get("missing_data_warning", "") or "none")
+        freshness = escape(str(row.get("data_freshness", ""))[:19])
+        html += f"""
+        <tr>
+          <td style="border:1px solid #ddd;vertical-align:top;"><b>{escape(row["ticker"])}</b><br><span style="color:#666;">${row["price"]:.2f}</span></td>
+          <td align="right" style="border:1px solid #ddd;vertical-align:top;">{row.get("score", 0):.0f}</td>
+          <td align="right" style="border:1px solid #ddd;vertical-align:top;">{row.get("opportunity_score", 0):.0f}</td>
+          <td align="right" style="border:1px solid #ddd;vertical-align:top;">{row.get("catalyst_score", 0):.0f}</td>
+          <td align="right" style="border:1px solid #ddd;vertical-align:top;">{row.get("quality_score", 0):.0f}</td>
+          <td style="border:1px solid #ddd;vertical-align:top;">
+            <b>Drivers</b><br>{drivers}<br>
+            <b>Risks</b><br>{risks}<br>
+            <span style="color:#666;">Freshness: {freshness}</span><br>
+            <span style="color:#999;">Missing data: {warning}</span>
+          </td>
         </tr>
         """
     html += "</table>"
@@ -441,15 +617,15 @@ def build_email(results, spy_df, qqq_df, regime, sector_extremes, reddit_plays):
 
       {html_sector_extremes(sector_extremes)}
       {html_reddit_plays(reddit_plays)}
-      {html_table("Top 10 Stocks", top_10)}
+      {html_top10_table(top_10)}
       {html_table("Top 5 Under $30", under_30)}
       {html_table("Top 5 Earnings Setups", earnings, reason_mode="earnings")}
       {html_table("Catalyst Watch", catalyst_watch, reason_mode="catalyst")}
       {html_table("Political / Geopolitical Watch", political_watch, reason_mode="political")}
 
       <p style="color:#777;font-size:12px;margin-top:28px;">
-        Research only. Not financial advice. Congressional trade disclosures can be delayed,
-        so politician-trade signals are secondary indicators.
+        Not financial advice. For research only. Verify data before trading.
+        Congressional trade disclosures can be delayed, so politician-trade signals are secondary indicators.
       </p>
     </body>
     </html>
@@ -476,8 +652,17 @@ def build_email(results, spy_df, qqq_df, regime, sector_extremes, reddit_plays):
     else:
         text += "No strong Reddit-related stock plays today.\n"
 
+    text += "\nTop 10 Stocks\n"
+    for r in top_10:
+        text += (
+            f"{r['ticker']} | Score {r.get('score', 0):.0f} | Opportunity {r.get('opportunity_score', 0):.0f} | "
+            f"Catalyst {r.get('catalyst_score', 0):.0f} | Quality {r.get('quality_score', 0):.0f}\n"
+            f"Drivers: {', '.join(r.get('top_drivers', top_drivers(r))[:3])}\n"
+            f"Risks: {', '.join(r.get('top_risks', top_risks(r))[:2])}\n"
+            f"Freshness: {str(r.get('data_freshness', ''))[:19]} | Missing data: {r.get('missing_data_warning') or 'none'}\n"
+        )
+
     sections = [
-        ("Top 10 Stocks", top_10, "normal"),
         ("Top 5 Under $30", under_30, "normal"),
         ("Top 5 Earnings Setups", earnings, "earnings"),
         ("Catalyst Watch", catalyst_watch, "catalyst"),

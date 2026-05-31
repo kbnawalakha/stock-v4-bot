@@ -10,7 +10,7 @@ NEUTRAL = "NEUTRAL"
 RISK_OFF = "RISK_OFF"
 
 
-def classify_market_regime() -> dict[str, float | str]:
+def classify_market_regime(breadth: dict | None = None) -> dict[str, float | str]:
     try:
         spy = get_history("SPY", period="6mo")
         qqq = get_history("QQQ", period="6mo")
@@ -32,6 +32,11 @@ def classify_market_regime() -> dict[str, float | str]:
         risk_score += 1.0 if qqq_20 > 1 else -1.0 if qqq_20 < -2 else 0.0
         risk_score += 1.0 if vix_level < 18 else -1.0 if vix_level > 24 else 0.0
         risk_score += 1.0 if vix_5 < -5 else -1.0 if vix_5 > 8 else 0.0
+        breadth_score = float((breadth or {}).get("breadth_score", 50.0))
+        if breadth_score >= 65:
+            risk_score += 1.0
+        elif breadth_score <= 40:
+            risk_score -= 1.0
 
         if risk_score >= 3:
             regime = RISK_ON
@@ -39,9 +44,11 @@ def classify_market_regime() -> dict[str, float | str]:
             regime = RISK_OFF
         else:
             regime = NEUTRAL
+        if regime == RISK_ON and breadth_score < 45:
+            regime = NEUTRAL
 
         confidence = min(1.0, max(0.35, abs(risk_score) / 6))
-        result = {"regime": regime, "confidence": float(confidence)}
+        result = {"regime": regime, "confidence": float(confidence), "breadth_score": breadth_score}
         return result
     except Exception as exc:
         logger.warning("market_regime_failed", extra={"error": str(exc)})

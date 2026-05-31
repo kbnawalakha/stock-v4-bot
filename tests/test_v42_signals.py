@@ -1,0 +1,86 @@
+import os
+import sys
+import unittest
+from pathlib import Path
+
+import pandas as pd
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from analyst_revisions import analyst_revision_score
+from insider_buying import insider_buying_score
+from market_breadth import market_breadth_regime
+from scoring import apply_reddit_blend, regime_adjusted_weights
+from volatility_setup import volatility_setup_score
+from volume_accumulation import volume_accumulation_score
+
+
+class V42SignalTests(unittest.TestCase):
+    def setUp(self):
+        self.original_env = dict(os.environ)
+        for key in ("FMP_API_KEY", "ALPHA_VANTAGE_API_KEY", "SEC_USER_AGENT"):
+            os.environ.pop(key, None)
+
+    def tearDown(self):
+        os.environ.clear()
+        os.environ.update(self.original_env)
+
+    def test_missing_api_keys_return_neutral(self):
+        analyst = analyst_revision_score("AAPL")
+        insider = insider_buying_score("AAPL")
+        self.assertEqual(analyst["score"], 0.0)
+        self.assertEqual(insider["score"], 0.0)
+
+    def test_scores_stay_in_expected_ranges(self):
+        df = self._price_frame()
+        volume = volume_accumulation_score("TEST", df)
+        volatility = volatility_setup_score("TEST", df)
+        self.assertGreaterEqual(volume["score"], 0.0)
+        self.assertLessEqual(volume["score"], 100.0)
+        self.assertGreaterEqual(volatility["score"], 0.0)
+        self.assertLessEqual(volatility["score"], 100.0)
+
+    def test_final_weights_normalize_to_one(self):
+        weights = regime_adjusted_weights("RISK_ON")
+        self.assertAlmostEqual(sum(weights.values()), 1.0, places=6)
+
+    def test_empty_data_does_not_crash(self):
+        empty = pd.DataFrame()
+        malformed = pd.DataFrame({"Close": [1, 2, 3]})
+        volume = volume_accumulation_score("TEST", empty)
+        volatility = volatility_setup_score("TEST", empty)
+        malformed_volume = volume_accumulation_score("TEST", malformed)
+        malformed_volatility = volatility_setup_score("TEST", malformed)
+        breadth = market_breadth_regime({"TEST": empty})
+        self.assertEqual(volume["score"], 50.0)
+        self.assertEqual(volatility["score"], 50.0)
+        self.assertEqual(malformed_volume["score"], 50.0)
+        self.assertEqual(malformed_volatility["score"], 50.0)
+        self.assertEqual(breadth["regime"], "BREADTH_NEUTRAL")
+
+    def test_reddit_blend_is_capped(self):
+        row = {"ticker": "TEST", "passed_quality_filter": True, "liquidity_score": 90, "price": 25}
+        blended = apply_reddit_blend(70.0, row, {"TEST": {"ticker": "TEST", "score": 100}}, enabled=True)
+        self.assertEqual(blended, 75.0)
+
+    def test_market_breadth_changes_regime(self):
+        strong = {f"T{i}": self._price_frame(start=10 + i, trend=0.4) for i in range(10)}
+        weak = {f"T{i}": self._price_frame(start=80 + i, trend=-0.4) for i in range(10)}
+        self.assertEqual(market_breadth_regime(strong)["regime"], "BREADTH_STRONG")
+        self.assertEqual(market_breadth_regime(weak)["regime"], "BREADTH_WEAK")
+
+    def _price_frame(self, start=20.0, trend=0.2):
+        dates = pd.date_range("2025-01-01", periods=220, freq="B")
+        close = pd.Series([start + i * trend for i in range(220)], index=dates)
+        if trend < 0:
+            close = close.clip(lower=1)
+        high = close * 1.02
+        low = close * 0.98
+        open_ = close.shift(1).fillna(close.iloc[0])
+        volume = pd.Series([1_000_000 + i * 1000 for i in range(220)], index=dates)
+        return pd.DataFrame({"Open": open_, "High": high, "Low": low, "Close": close, "Volume": volume})
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -23,15 +23,24 @@ jobs:
 
       - run: pip install -r requirements.txt
 
+      - run: python -m unittest discover -s tests
+
       - run: python src/main_v4.py
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
           GEMINI_REDDIT_BATCH_SIZE: ${{ secrets.GEMINI_REDDIT_BATCH_SIZE }}
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
           CAPITOLTRADES_BASE_URL: ${{ secrets.CAPITOLTRADES_BASE_URL }}
           REDDIT_SUBREDDITS: ${{ secrets.REDDIT_SUBREDDITS }}
           REDDIT_POST_LIMIT: ${{ secrets.REDDIT_POST_LIMIT }}
+          BLEND_REDDIT_IN_MAIN_SCORE: ${{ secrets.BLEND_REDDIT_IN_MAIN_SCORE }}
+          INCLUDE_HIGH_RISK_MICROCAPS: ${{ secrets.INCLUDE_HIGH_RISK_MICROCAPS }}
+          MIN_STOCK_PRICE: ${{ secrets.MIN_STOCK_PRICE }}
+          MIN_AVG_DAILY_VOLUME: ${{ secrets.MIN_AVG_DAILY_VOLUME }}
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
           EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
