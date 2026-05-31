@@ -1,21 +1,31 @@
 {
   "evaluated": [],
-  "last_updated": "2026-05-30T21:01:50.131143+00:00",
+  "last_updated": "2026-05-31T06:27:23.982533+00:00",
   "learned_weights": {
-    "earnings": 0.08,
-    "institutional_ownership": 0.07,
-    "news_sentiment": 0.18,
-    "opening_activity": 0.18,
-    "options_flow": 0.09,
-    "pattern_trading": 0.07,
-    "political_geo": 0.02,
-    "politician_trade": 0.01,
-    "relative_strength": 0.09,
-    "sector_strength": 0.08,
-    "trend": 0.13
+    "analyst_revisions": 0.0819672131147541,
+    "earnings_quality": 0.06557377049180328,
+    "fundamental_momentum": 0.0819672131147541,
+    "insider_buying": 0.05737704918032788,
+    "institutional_ownership": 0.04098360655737705,
+    "news_sentiment": 0.10655737704918034,
+    "opening_activity": 0.09836065573770492,
+    "options_flow": 0.06557377049180328,
+    "pattern_trading": 0.04098360655737705,
+    "political_geo": 0.00819672131147541,
+    "politician_trade": 0.00819672131147541,
+    "relative_strength": 0.06557377049180328,
+    "sector_strength": 0.04918032786885246,
+    "short_squeeze": 0.03278688524590164,
+    "trend": 0.0819672131147541,
+    "volatility_setup": 0.04918032786885246,
+    "volume_accumulation": 0.06557377049180328
   },
   "signal_scores": {
+    "analyst_revisions": 0.0,
     "earnings": 0.0,
+    "earnings_quality": 0.0,
+    "fundamental_momentum": 0.0,
+    "insider_buying": 0.0,
     "institutional_ownership": 0.0,
     "news_sentiment": 0.0,
     "opening_activity": 0.0,
@@ -25,7 +35,10 @@
     "politician_trade": 0.0,
     "relative_strength": 0.0,
     "sector_strength": 0.0,
-    "trend": 0.0
+    "short_squeeze": 0.0,
+    "trend": 0.0,
+    "volatility_setup": 0.0,
+    "volume_accumulation": 0.0
   },
   "version": 1
 }
