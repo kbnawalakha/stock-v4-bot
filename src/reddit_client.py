@@ -20,7 +20,7 @@ DEFAULT_SUBREDDITS = [
 ]
 DEFAULT_POST_LIMIT = 30
 REQUEST_TIMEOUT_SECONDS = 15
-USER_AGENT = "stock-v4-bot/1.0"
+DEFAULT_USER_AGENT = "stock-v4-bot/1.0 contact:github.com/kbnawalakha/stock-v4-bot"
 
 CASHTAG_RE = re.compile(r"\$([A-Z]{1,5})(?![A-Z])")
 UPPER_TICKER_RE = re.compile(r"\b([A-Z]{2,5})\b")
@@ -43,28 +43,11 @@ def fetch_reddit_posts(
     posts: list[dict[str, Any]] = []
 
     for subreddit in subreddits:
-        url = f"https://www.reddit.com/r/{subreddit}/hot.json"
         try:
-            response = requests.get(
-                url,
-                headers={"User-Agent": USER_AGENT},
-                params={"limit": max(1, min(limit, 100))},
-                timeout=REQUEST_TIMEOUT_SECONDS,
-            )
-            if response.status_code == 429:
-                logger.warning(json.dumps({"event": "reddit_rate_limited", "subreddit": subreddit}))
-                time.sleep(2)
+            payload = _fetch_subreddit_listing(subreddit, limit)
+            if payload is None:
                 continue
-            if response.status_code >= 400:
-                logger.warning(json.dumps({
-                    "event": "reddit_http_error",
-                    "subreddit": subreddit,
-                    "status_code": response.status_code,
-                    "response_snippet": response.text[:500],
-                }))
-                continue
-
-            children = response.json().get("data", {}).get("children", [])
+            children = payload.get("data", {}).get("children", [])
             subreddit_posts = []
             for child in children:
                 data = child.get("data", {})
@@ -91,6 +74,84 @@ def fetch_reddit_posts(
 
     logger.info(json.dumps({"event": "reddit_posts_total", "post_count": len(posts)}))
     return posts
+
+
+def _fetch_subreddit_listing(subreddit: str, limit: int) -> dict[str, Any] | None:
+    params = {"limit": max(1, min(limit, 100)), "raw_json": 1}
+    headers = {"User-Agent": os.getenv("REDDIT_USER_AGENT") or DEFAULT_USER_AGENT}
+    urls = [
+        f"https://www.reddit.com/r/{subreddit}/hot.json",
+        f"https://old.reddit.com/r/{subreddit}/hot.json",
+    ]
+
+    last_status = None
+    for attempt, url in enumerate(urls, start=1):
+        try:
+            response = requests.get(
+                url,
+                headers=headers,
+                params=params,
+                timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+            last_status = response.status_code
+            if response.status_code == 429:
+                logger.warning(json.dumps({
+                    "event": "reddit_rate_limited",
+                    "subreddit": subreddit,
+                    "attempt": attempt,
+                    "host": _host_label(url),
+                }))
+                time.sleep(2)
+                continue
+            if response.status_code in {401, 403, 451}:
+                logger.warning(json.dumps({
+                    "event": "reddit_subreddit_blocked",
+                    "subreddit": subreddit,
+                    "status_code": response.status_code,
+                    "attempt": attempt,
+                    "host": _host_label(url),
+                }))
+                continue
+            if response.status_code >= 400:
+                logger.warning(json.dumps({
+                    "event": "reddit_http_error",
+                    "subreddit": subreddit,
+                    "status_code": response.status_code,
+                    "attempt": attempt,
+                    "host": _host_label(url),
+                    "response_text_length": len(response.text or ""),
+                }))
+                continue
+
+            try:
+                payload = response.json()
+            except ValueError as exc:
+                logger.warning(json.dumps({
+                    "event": "reddit_json_parse_failed",
+                    "subreddit": subreddit,
+                    "attempt": attempt,
+                    "host": _host_label(url),
+                    "error": str(exc),
+                    "response_text_length": len(response.text or ""),
+                }))
+                continue
+            if isinstance(payload, dict):
+                return payload
+        except requests.RequestException as exc:
+            logger.warning(json.dumps({
+                "event": "reddit_request_failed",
+                "subreddit": subreddit,
+                "attempt": attempt,
+                "host": _host_label(url),
+                "error": str(exc),
+            }))
+
+    logger.warning(json.dumps({
+        "event": "reddit_subreddit_skipped",
+        "subreddit": subreddit,
+        "last_status_code": last_status,
+    }))
+    return None
 
 
 def extract_reddit_candidates(
@@ -161,6 +222,12 @@ def _configured_subreddits() -> list[str]:
     if configured.strip():
         return [item.strip().strip("/").replace("r/", "") for item in configured.split(",") if item.strip()]
     return DEFAULT_SUBREDDITS
+
+
+def _host_label(url: str) -> str:
+    if "old.reddit.com" in url:
+        return "old.reddit.com"
+    return "www.reddit.com"
 
 
 def _looks_like_ticker(ticker: str, cashtags: set[str], universe: set[str]) -> bool:

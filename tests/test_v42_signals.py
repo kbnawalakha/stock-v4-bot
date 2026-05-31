@@ -15,6 +15,7 @@ from insider_buying import insider_buying_score
 from main_v4 import quality_liquidity_filter
 from market_breadth import market_breadth_regime
 from scoring import apply_reddit_blend, regime_adjusted_weights
+from reddit_client import _fetch_subreddit_listing
 from universe_builder import build_daily_universe, normalize_ticker
 from volatility_setup import volatility_setup_score
 from volume_accumulation import volume_accumulation_score
@@ -133,6 +134,28 @@ class V42SignalTests(unittest.TestCase):
                 })
         self.assertIn("AAPL", summary["stage1_quality_universe"])
         self.assertLessEqual(len(summary["stage1_quality_universe"]), 10)
+
+    def test_reddit_fetch_falls_back_after_403(self):
+        class FakeResponse:
+            def __init__(self, status_code, payload=None, text=""):
+                self.status_code = status_code
+                self._payload = payload or {}
+                self.text = text
+
+            def json(self):
+                return self._payload
+
+        responses = [
+            FakeResponse(403, text="<html>blocked</html>"),
+            FakeResponse(200, payload={"data": {"children": []}}),
+        ]
+
+        with patch("reddit_client.requests.get", side_effect=responses) as mock_get:
+            payload = _fetch_subreddit_listing("pennystocks", 10)
+
+        self.assertEqual(payload, {"data": {"children": []}})
+        self.assertEqual(mock_get.call_count, 2)
+        self.assertIn("old.reddit.com", mock_get.call_args_list[1].args[0])
 
     def _price_frame(self, start=20.0, trend=0.2):
         dates = pd.date_range("2025-01-01", periods=220, freq="B")
