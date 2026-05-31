@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from analyst_revisions import analyst_revision_score
 from insider_buying import insider_buying_score
+from main_v4 import quality_liquidity_filter
 from market_breadth import market_breadth_regime
 from scoring import apply_reddit_blend, regime_adjusted_weights
 from volatility_setup import volatility_setup_score
@@ -69,6 +70,13 @@ class V42SignalTests(unittest.TestCase):
         weak = {f"T{i}": self._price_frame(start=80 + i, trend=-0.4) for i in range(10)}
         self.assertEqual(market_breadth_regime(strong)["regime"], "BREADTH_STRONG")
         self.assertEqual(market_breadth_regime(weak)["regime"], "BREADTH_WEAK")
+
+    def test_blank_numeric_env_uses_defaults(self):
+        os.environ["MIN_STOCK_PRICE"] = ""
+        os.environ["MIN_AVG_DAILY_VOLUME"] = ""
+        passed, details = quality_liquidity_filter("TEST", self._price_frame(start=20, trend=0.1))
+        self.assertTrue(passed)
+        self.assertGreater(details["liquidity_score"], 0)
 
     def _price_frame(self, start=20.0, trend=0.2):
         dates = pd.date_range("2025-01-01", periods=220, freq="B")

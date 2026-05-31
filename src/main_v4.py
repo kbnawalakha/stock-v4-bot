@@ -256,8 +256,8 @@ def quality_liquidity_filter(ticker: str, df) -> tuple[bool, dict]:
 
     price = float(df["Close"].iloc[-1])
     avg_volume = float(df["Volume"].tail(30).mean())
-    min_price = float(os.getenv("MIN_STOCK_PRICE", MIN_PRICE))
-    min_volume = float(os.getenv("MIN_AVG_DAILY_VOLUME", MIN_AVG_DAILY_VOLUME))
+    min_price = env_float("MIN_STOCK_PRICE", MIN_PRICE)
+    min_volume = env_float("MIN_AVG_DAILY_VOLUME", MIN_AVG_DAILY_VOLUME)
     price_ok = price > min_price
     volume_ok = avg_volume > min_volume
     extreme_penny = price < 2 or avg_volume < 150_000
@@ -273,6 +273,17 @@ def quality_liquidity_filter(ticker: str, df) -> tuple[bool, dict]:
         "passed_quality_filter": passed,
         "quality_filter_reason": reason,
     }
+
+
+def env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or str(raw).strip() == "":
+        return float(default)
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        log_event("invalid_float_env", name=name, value=raw, default=default)
+        return float(default)
 
 
 def analyze_universe(base_weights: dict[str, float] | None = None):
