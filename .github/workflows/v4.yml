@@ -68,5 +68,14 @@ jobs:
             echo "No learning updates to commit."
           else
             git commit -m "Update recommendation learning state"
-            git push
+            for attempt in 1 2 3; do
+              git pull --rebase origin main
+              if git push; then
+                exit 0
+              fi
+              echo "Push failed on attempt ${attempt}; retrying after remote refresh."
+              sleep 5
+            done
+            echo "Failed to push learning state after retries."
+            exit 1
           fi

@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from analyst_revisions import analyst_revision_score
 from insider_buying import insider_buying_score
+from fmp_client import FMPClient
 from main_v4 import quality_liquidity_filter
 from market_breadth import market_breadth_regime
 from scoring import apply_reddit_blend, regime_adjusted_weights
@@ -164,6 +165,31 @@ class V42SignalTests(unittest.TestCase):
         self.assertEqual(payload, {"data": {"children": []}})
         self.assertEqual(mock_get.call_count, 2)
         self.assertIn("old.reddit.com", mock_get.call_args_list[1].args[0])
+
+    def test_fmp_legacy_403_disables_client_for_run(self):
+        class FakeResponse:
+            status_code = 403
+            text = '{"Error Message":"Legacy Endpoint : Due to Legacy endpoints being no longer supported"}'
+
+            def json(self):
+                return {}
+
+        class FakeSession:
+            def __init__(self):
+                self.calls = 0
+
+            def get(self, *args, **kwargs):
+                self.calls += 1
+                return FakeResponse()
+
+        client = FMPClient(api_key="test")
+        session = FakeSession()
+        client.session = session
+
+        self.assertIsNone(client.get("/v3/balance-sheet-statement/XYZ"))
+        self.assertFalse(client.available)
+        self.assertIsNone(client.get("/v4/insider-trading"))
+        self.assertEqual(session.calls, 1)
 
     def _price_frame(self, start=20.0, trend=0.2):
         dates = pd.date_range("2025-01-01", periods=220, freq="B")
