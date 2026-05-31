@@ -55,6 +55,7 @@ from short_squeeze import short_squeeze_score
 from signal_utils import signed_to_percent
 from volatility_setup import volatility_setup_score
 from volume_accumulation import volume_accumulation_score
+from universe_builder import build_daily_universe, universe_config, update_universe_stages
 from learning import refresh_learning_state
 from performance import log_predictions
 from emailer import send_email
@@ -291,10 +292,37 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
     qqq_df = get_history("QQQ")
     sector_cache = {}
     universe_price_data = {}
-    results = []
+    stage2_rows = []
     missing_api_warnings = [name for name in OPTIONAL_API_ENVS if not os.getenv(name)]
+    cfg = universe_config()
+    try:
+        universe_summary = build_daily_universe(cfg)
+        candidate_universe = universe_summary.get("stage1_quality_universe") or UNIVERSE
+    except Exception as exc:
+        log_event("universe_builder_failed", error=str(exc), fallback_count=len(UNIVERSE))
+        universe_summary = {
+            "raw_universe": list(UNIVERSE),
+            "filtered_universe": list(UNIVERSE),
+            "stage1_quality_universe": list(UNIVERSE),
+            "stage2_opportunity_candidates": [],
+            "stage3_deep_analysis_candidates": [],
+            "final_top_10": [],
+            "sources_used": {"manual_seed_fallback": len(UNIVERSE)},
+            "removed": {},
+            "errors": [{"source": "universe_builder", "error": str(exc)}],
+        }
+        candidate_universe = UNIVERSE
 
-    for ticker in UNIVERSE:
+    log_event(
+        "universe_stage1_ready",
+        raw_count=len(universe_summary.get("raw_universe", [])),
+        filtered_count=len(universe_summary.get("filtered_universe", [])),
+        stage1_count=len(candidate_universe),
+        sources_used=universe_summary.get("sources_used", {}),
+        removed=universe_summary.get("removed", {}),
+    )
+
+    for ticker in candidate_universe:
         try:
             df = get_history(ticker)
             universe_price_data[ticker] = df
@@ -308,32 +336,14 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
                 sector_cache[sector_ticker] = get_history(sector_ticker)
             sector_df = sector_cache[sector_ticker]
 
-            news_score, catalysts, has_catalyst = news_catalyst_score(ticker)
-            headlines = get_recent_headlines(ticker)
-            pg_score, pg_reasons = political_geo_score(ticker, headlines)
-            pol_score, pol_reasons = politician_trade_score(ticker)
             opening = opening_activity_score(ticker)
-            earnings = earnings_score(ticker)
-            options = options_flow_score(ticker)
-            institutional = institutional_change_score(ticker)
             patterns = pattern_trading_score(df)
-            analyst = analyst_revision_score(ticker)
-            fundamentals = fundamental_momentum_score(ticker)
             volume = volume_accumulation_score(ticker, df)
-            squeeze = short_squeeze_score(ticker)
-            insider = insider_buying_score(ticker)
             volatility = volatility_setup_score(ticker, df)
             etf_flow = etf_flow_exposure_score(ticker, sector_ticker, sector_df)
             log_event("opening_activity_score", ticker=ticker, **opening)
-            log_event("earnings_score", ticker=ticker, **earnings)
-            log_event("options_score", ticker=ticker, **options)
-            log_event("institutional_score", ticker=ticker, **institutional)
             log_event("pattern_trading_score", ticker=ticker, **patterns)
-            log_event("analyst_revision_score", ticker=ticker, **analyst)
-            log_event("fundamental_momentum_score", ticker=ticker, **fundamentals)
             log_event("volume_accumulation_score", ticker=ticker, **volume)
-            log_event("short_squeeze_score", ticker=ticker, **squeeze)
-            log_event("insider_buying_score", ticker=ticker, **insider)
             log_event("volatility_setup_score", ticker=ticker, **volatility)
             log_event("etf_flow_exposure_score", ticker=ticker, **etf_flow)
 
@@ -342,23 +352,23 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
                 "relative_strength": relative_strength_score(df, spy_df, qqq_df),
                 "sector_strength": sector_strength_score(sector_df, spy_df),
                 "breakout": breakout_score(df),
-                "news_catalyst": news_score,
-                "news_sentiment": max(0.0, min(100.0, 50.0 + news_score / 2)),
-                "political_geo": pg_score,
-                "politician_trade": pol_score,
+                "news_catalyst": 0.0,
+                "news_sentiment": 50.0,
+                "political_geo": 0.0,
+                "politician_trade": 0.0,
                 "risk_quality": risk_quality_score(df),
                 "opening_activity": opening["score"],
-                "earnings": earnings["score"],
-                "earnings_quality": earnings["score"],
-                "options_flow": options["score"],
-                "institutional_ownership": institutional["score"],
+                "earnings": 50.0,
+                "earnings_quality": 50.0,
+                "options_flow": 50.0,
+                "institutional_ownership": 50.0,
                 "pattern_trading": patterns["score"],
-                "earnings_proximity": earnings_proximity_score(earnings.get("days_to_earnings")),
-                "analyst_revisions": signed_to_percent(analyst["score"]),
-                "fundamental_momentum": signed_to_percent(fundamentals["score"]),
+                "earnings_proximity": 0.0,
+                "analyst_revisions": 50.0,
+                "fundamental_momentum": 50.0,
                 "volume_accumulation": volume["score"],
-                "short_squeeze": squeeze["score"],
-                "insider_buying": signed_to_percent(insider["score"]),
+                "short_squeeze": 50.0,
+                "insider_buying": 50.0,
                 "volatility_setup": volatility["score"],
                 "etf_flow_exposure": etf_flow["score"],
                 "liquidity_score": quality_details["liquidity_score"],
@@ -366,26 +376,26 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
 
             row = {
                 "ticker": ticker,
-                "days_to_earnings": earnings.get("days_to_earnings"),
-                "catalysts": catalysts,
-                "headlines": headlines,
-                "has_catalyst": has_catalyst,
-                "political_reasons": pg_reasons,
-                "politician_reasons": pol_reasons,
+                "days_to_earnings": None,
+                "catalysts": [],
+                "headlines": [],
+                "has_catalyst": False,
+                "political_reasons": [],
+                "politician_reasons": [],
                 "opening_details": opening,
-                "earnings_details": earnings,
-                "options_details": options,
-                "institutional_details": institutional,
+                "earnings_details": {},
+                "options_details": {},
+                "institutional_details": {},
                 "pattern_details": patterns,
-                "analyst_details": analyst,
-                "fundamental_details": fundamentals,
+                "analyst_details": {},
+                "fundamental_details": {},
                 "volume_details": volume,
-                "short_squeeze_details": squeeze,
-                "insider_details": insider,
+                "short_squeeze_details": {},
+                "insider_details": {},
                 "volatility_details": volatility,
                 "etf_flow_details": etf_flow,
                 "sentiment_confidence": 0.0,
-                "sentiment_reasoning": "Gemini overnight sentiment not evaluated before top-20 filtering.",
+                "sentiment_reasoning": "Gemini overnight sentiment not evaluated before deep-analysis filtering.",
                 "data_freshness": datetime.now(ZoneInfo("America/Los_Angeles")).isoformat(),
                 "missing_data_warning": ", ".join(missing_api_warnings) if missing_api_warnings else "",
                 **quality_details,
@@ -394,38 +404,124 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
             row["score"] = staged_final_score(row, weights=base_weights)
             row["earnings_score"] = earnings_setup_score(row)
             row["catalyst_watch_score"] = catalyst_watch_score(row)
-            results.append(row)
+            stage2_rows.append(row)
             log_event(
-                "candidate_scores",
+                "stage2_candidate_score",
                 ticker=ticker,
                 score=row["score"],
                 opening=row["opening_activity"],
-                options=row["options_flow"],
-                earnings=row["earnings"],
+                trend=row["trend"],
+                relative_strength=row["relative_strength"],
+                sector_strength=row["sector_strength"],
+                breakout=row["breakout"],
+                pattern=row["pattern_trading"],
                 opportunity=row["opportunity_score"],
-                catalyst=row["catalyst_score"],
                 quality=row["quality_score"],
             )
         except Exception as exc:
             log_event("ticker_failed", ticker=ticker, error=str(exc))
             continue
 
-    preliminary = sorted(results, key=lambda x: x["score"], reverse=True)
-    top_20 = preliminary[:20]
-    log_event("top_20_candidates", tickers=[r["ticker"] for r in top_20])
+    stage2_ranked = sorted(stage2_rows, key=lambda x: x["score"], reverse=True)[: cfg.target_stage2_size]
+    update_universe_stages(universe_summary, stage2=[r["ticker"] for r in stage2_ranked])
+    log_event(
+        "stage2_opportunity_candidates",
+        count=len(stage2_ranked),
+        target=cfg.target_stage2_size,
+        tickers=[r["ticker"] for r in stage2_ranked],
+    )
+
+    stage3_rows = []
+    for row in stage2_ranked:
+        ticker = row["ticker"]
+        try:
+            headlines = get_recent_headlines(ticker)
+            news_score, catalysts, has_catalyst = news_catalyst_score(ticker)
+            pg_score, pg_reasons = political_geo_score(ticker, headlines)
+            pol_score, pol_reasons = politician_trade_score(ticker)
+            earnings = earnings_score(ticker)
+            options = options_flow_score(ticker)
+            institutional = institutional_change_score(ticker)
+            analyst = analyst_revision_score(ticker)
+            fundamentals = fundamental_momentum_score(ticker)
+            squeeze = short_squeeze_score(ticker)
+            insider = insider_buying_score(ticker)
+
+            row.update({
+                "headlines": headlines,
+                "news_catalyst": news_score,
+                "news_sentiment": max(0.0, min(100.0, 50.0 + news_score / 2)),
+                "catalysts": catalysts,
+                "has_catalyst": has_catalyst,
+                "political_geo": pg_score,
+                "politician_trade": pol_score,
+                "political_reasons": pg_reasons,
+                "politician_reasons": pol_reasons,
+                "days_to_earnings": earnings.get("days_to_earnings"),
+                "earnings": earnings["score"],
+                "earnings_quality": earnings["score"],
+                "earnings_proximity": earnings_proximity_score(earnings.get("days_to_earnings")),
+                "options_flow": options["score"],
+                "institutional_ownership": institutional["score"],
+                "analyst_revisions": signed_to_percent(analyst["score"]),
+                "fundamental_momentum": signed_to_percent(fundamentals["score"]),
+                "short_squeeze": squeeze["score"],
+                "insider_buying": signed_to_percent(insider["score"]),
+                "earnings_details": earnings,
+                "options_details": options,
+                "institutional_details": institutional,
+                "analyst_details": analyst,
+                "fundamental_details": fundamentals,
+                "short_squeeze_details": squeeze,
+                "insider_details": insider,
+            })
+            row["score"] = staged_final_score(row, weights=base_weights)
+            row["earnings_score"] = earnings_setup_score(row)
+            row["catalyst_watch_score"] = catalyst_watch_score(row)
+            stage3_rows.append(row)
+
+            log_event("earnings_score", ticker=ticker, **earnings)
+            log_event("options_score", ticker=ticker, **options)
+            log_event("institutional_score", ticker=ticker, **institutional)
+            log_event("analyst_revision_score", ticker=ticker, **analyst)
+            log_event("fundamental_momentum_score", ticker=ticker, **fundamentals)
+            log_event("short_squeeze_score", ticker=ticker, **squeeze)
+            log_event("insider_buying_score", ticker=ticker, **insider)
+            log_event(
+                "stage3_candidate_score",
+                ticker=ticker,
+                score=row["score"],
+                options=row["options_flow"],
+                earnings=row["earnings"],
+                analyst=row["analyst_revisions"],
+                institutional=row["institutional_ownership"],
+                catalyst=row["catalyst_score"],
+            )
+        except Exception as exc:
+            log_event("stage3_ticker_failed", ticker=ticker, error=str(exc))
+            stage3_rows.append(row)
+            continue
+
+    preliminary = sorted(stage3_rows, key=lambda x: x["score"], reverse=True)
+    top_20 = preliminary[: cfg.target_deep_analysis_size]
+    update_universe_stages(universe_summary, stage3=[r["ticker"] for r in top_20])
+    log_event("top_20_candidates", count=len(top_20), tickers=[r["ticker"] for r in top_20])
 
     finnhub_client = get_finnhub_client()
     for row in top_20:
-        finnhub_headlines = finnhub_client.overnight_headlines(row["ticker"])
-        if finnhub_headlines:
-            row["headlines"] = finnhub_headlines
-        log_event(
-            "finnhub_news_enrichment",
-            ticker=row["ticker"],
-            headline_count=len(finnhub_headlines),
-            calls_made=finnhub_client.calls_made,
-            max_calls_per_minute=finnhub_client.max_calls_per_minute,
-        )
+        try:
+            finnhub_headlines = finnhub_client.overnight_headlines(row["ticker"])
+            if finnhub_headlines:
+                row["headlines"] = finnhub_headlines
+            log_event(
+                "finnhub_news_enrichment",
+                ticker=row["ticker"],
+                headline_count=len(finnhub_headlines),
+                calls_made=finnhub_client.calls_made,
+                max_calls_per_minute=finnhub_client.max_calls_per_minute,
+            )
+        except Exception as exc:
+            log_event("finnhub_news_enrichment_failed", ticker=row["ticker"], error=str(exc))
 
     sentiment_results = score_overnight_sentiments(top_20)
     log_event("gemini_sentiment_batch", tickers=list(sentiment_results.keys()), calls_made=1)
@@ -449,7 +545,7 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
     log_event("market_breadth", **breadth)
     log_event("regime", **regime, learned_base_weights=base_weights, weights=weights)
 
-    for row in preliminary:
+    for row in top_20:
         row["regime"] = regime["regime"]
         row["regime_confidence"] = regime["confidence"]
         row["market_breadth_regime"] = breadth["regime"]
@@ -461,8 +557,11 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
         row["top_drivers"] = top_drivers(row)
         row["top_risks"] = top_risks(row)
 
+    final_results = sorted(top_20, key=lambda x: x["score"], reverse=True)
+    update_universe_stages(universe_summary, final_top_10=[r["ticker"] for r in final_results[:TOP_N]])
+    log_event("final_top_10", tickers=[r["ticker"] for r in final_results[:TOP_N]])
     sectors = sector_extreme_signals(spy_df, qqq_df)
-    return sorted(preliminary, key=lambda x: x["score"], reverse=True), spy_df, qqq_df, regime, sectors, reddit_plays
+    return final_results, spy_df, qqq_df, regime, sectors, reddit_plays, universe_summary
 
 
 def html_table(title, rows, reason_mode="normal"):
@@ -589,7 +688,63 @@ def html_reddit_plays(rows):
     return html
 
 
-def build_email(results, spy_df, qqq_df, regime, sector_extremes, reddit_plays):
+def html_universe_summary(summary):
+    summary = summary or {}
+    sources = summary.get("sources_used", {})
+    removed = summary.get("removed", {})
+    html = """
+    <h2 style="margin-top:28px;border-bottom:2px solid #222;padding-bottom:6px;">Universe Summary</h2>
+    <table width="100%" cellpadding="8" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px;">
+      <tr style="background:#f2f2f2;">
+        <th align="left" style="border:1px solid #ddd;">Stage</th>
+        <th align="right" style="border:1px solid #ddd;">Count</th>
+        <th align="left" style="border:1px solid #ddd;">Details</th>
+      </tr>
+    """
+    rows = [
+        ("Raw universe", len(summary.get("raw_universe", [])), ", ".join(f"{escape(str(k))}: {v}" for k, v in sources.items()) or "manual seed only"),
+        ("Quality universe", len(summary.get("stage1_quality_universe", [])), ", ".join(f"{escape(str(k))}: {v}" for k, v in removed.items() if v) or "no removals recorded"),
+        ("Opportunity candidates", len(summary.get("stage2_opportunity_candidates", [])), ", ".join(summary.get("stage2_opportunity_candidates", [])[:12])),
+        ("Deep analysis candidates", len(summary.get("stage3_deep_analysis_candidates", [])), ", ".join(summary.get("stage3_deep_analysis_candidates", [])[:12])),
+        ("Final top 10", len(summary.get("final_top_10", [])), ", ".join(summary.get("final_top_10", []))),
+    ]
+    for label, count, details in rows:
+        html += f"""
+        <tr>
+          <td style="border:1px solid #ddd;vertical-align:top;"><b>{label}</b></td>
+          <td align="right" style="border:1px solid #ddd;vertical-align:top;">{count}</td>
+          <td style="border:1px solid #ddd;vertical-align:top;">{escape(str(details))}</td>
+        </tr>
+        """
+    if summary.get("errors"):
+        html += f"""
+        <tr>
+          <td style="border:1px solid #ddd;vertical-align:top;"><b>Warnings</b></td>
+          <td align="right" style="border:1px solid #ddd;vertical-align:top;">{len(summary.get("errors", []))}</td>
+          <td style="border:1px solid #ddd;vertical-align:top;">Some universe sources or lookups failed and were skipped; processing continued.</td>
+        </tr>
+        """
+    html += "</table>"
+    return html
+
+
+def universe_summary_text(summary):
+    summary = summary or {}
+    lines = [
+        "Universe Summary",
+        f"Raw universe: {len(summary.get('raw_universe', []))}",
+        f"Quality universe: {len(summary.get('stage1_quality_universe', []))}",
+        f"Opportunity candidates: {len(summary.get('stage2_opportunity_candidates', []))}",
+        f"Deep analysis candidates: {len(summary.get('stage3_deep_analysis_candidates', []))}",
+        f"Final top 10: {', '.join(summary.get('final_top_10', []))}",
+        f"Sources: {summary.get('sources_used', {})}",
+        f"Removed: {summary.get('removed', {})}",
+        f"Warnings: {len(summary.get('errors', []))}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def build_email(results, spy_df, qqq_df, regime, sector_extremes, reddit_plays, universe_summary=None):
     now_pt = datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%Y-%m-%d %I:%M %p %Z")
     spy_20 = pct_return(spy_df, 20)
     qqq_20 = pct_return(qqq_df, 20)
@@ -628,6 +783,7 @@ def build_email(results, spy_df, qqq_df, regime, sector_extremes, reddit_plays):
 
       {html_sector_extremes(sector_extremes)}
       {html_reddit_plays(reddit_plays)}
+      {html_universe_summary(universe_summary)}
       {html_top10_table(top_10)}
       {html_table("Top 5 Under $30", under_30)}
       {html_table("Top 5 Earnings Setups", earnings, reason_mode="earnings")}
@@ -643,6 +799,7 @@ def build_email(results, spy_df, qqq_df, regime, sector_extremes, reddit_plays):
     """
 
     text = "Daily Stock Alpha Report\n\n"
+    text += universe_summary_text(universe_summary)
     text += "\nExtreme Sector Signals\n"
     if sector_extremes:
         for sector in sector_extremes:
@@ -693,8 +850,8 @@ def build_email(results, spy_df, qqq_df, regime, sector_extremes, reddit_plays):
 def main():
     learned_weights = refresh_learning_state()
     log_event("learned_weights", weights=learned_weights)
-    results, spy_df, qqq_df, regime, sector_extremes, reddit_plays = analyze_universe(learned_weights)
-    html, text, top_10 = build_email(results, spy_df, qqq_df, regime, sector_extremes, reddit_plays)
+    results, spy_df, qqq_df, regime, sector_extremes, reddit_plays, universe_summary = analyze_universe(learned_weights)
+    html, text, top_10 = build_email(results, spy_df, qqq_df, regime, sector_extremes, reddit_plays, universe_summary)
 
     print(text)
     log_predictions(top_10)

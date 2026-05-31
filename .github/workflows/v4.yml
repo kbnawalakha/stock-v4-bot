@@ -39,6 +39,19 @@ jobs:
           REDDIT_POST_LIMIT: ${{ secrets.REDDIT_POST_LIMIT }}
           BLEND_REDDIT_IN_MAIN_SCORE: ${{ secrets.BLEND_REDDIT_IN_MAIN_SCORE }}
           INCLUDE_HIGH_RISK_MICROCAPS: ${{ secrets.INCLUDE_HIGH_RISK_MICROCAPS }}
+          USE_DYNAMIC_UNIVERSE: ${{ secrets.USE_DYNAMIC_UNIVERSE }}
+          MAX_RAW_UNIVERSE_SIZE: ${{ secrets.MAX_RAW_UNIVERSE_SIZE }}
+          TARGET_STAGE1_SIZE: ${{ secrets.TARGET_STAGE1_SIZE }}
+          TARGET_STAGE2_SIZE: ${{ secrets.TARGET_STAGE2_SIZE }}
+          TARGET_DEEP_ANALYSIS_SIZE: ${{ secrets.TARGET_DEEP_ANALYSIS_SIZE }}
+          MIN_PRICE: ${{ secrets.MIN_PRICE }}
+          MIN_MARKET_CAP: ${{ secrets.MIN_MARKET_CAP }}
+          INCLUDE_MICROCAPS: ${{ secrets.INCLUDE_MICROCAPS }}
+          INCLUDE_REDDIT_IN_UNIVERSE: ${{ secrets.INCLUDE_REDDIT_IN_UNIVERSE }}
+          INCLUDE_ETF_HOLDINGS: ${{ secrets.INCLUDE_ETF_HOLDINGS }}
+          INCLUDE_RUSSELL_3000: ${{ secrets.INCLUDE_RUSSELL_3000 }}
+          INCLUDE_SP500: ${{ secrets.INCLUDE_SP500 }}
+          INCLUDE_NASDAQ_100: ${{ secrets.INCLUDE_NASDAQ_100 }}
           MIN_STOCK_PRICE: ${{ secrets.MIN_STOCK_PRICE }}
           MIN_AVG_DAILY_VOLUME: ${{ secrets.MIN_AVG_DAILY_VOLUME }}
           EMAIL_USER: ${{ secrets.EMAIL_USER }}

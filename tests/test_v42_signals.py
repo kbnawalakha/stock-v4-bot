@@ -1,7 +1,9 @@
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -13,6 +15,7 @@ from insider_buying import insider_buying_score
 from main_v4 import quality_liquidity_filter
 from market_breadth import market_breadth_regime
 from scoring import apply_reddit_blend, regime_adjusted_weights
+from universe_builder import build_daily_universe, normalize_ticker
 from volatility_setup import volatility_setup_score
 from volume_accumulation import volume_accumulation_score
 
@@ -20,7 +23,20 @@ from volume_accumulation import volume_accumulation_score
 class V42SignalTests(unittest.TestCase):
     def setUp(self):
         self.original_env = dict(os.environ)
-        for key in ("FMP_API_KEY", "ALPHA_VANTAGE_API_KEY", "SEC_USER_AGENT"):
+        for key in (
+            "FMP_API_KEY",
+            "ALPHA_VANTAGE_API_KEY",
+            "SEC_USER_AGENT",
+            "USE_DYNAMIC_UNIVERSE",
+            "MIN_PRICE",
+            "MIN_AVG_DAILY_VOLUME",
+            "MIN_MARKET_CAP",
+            "INCLUDE_SP500",
+            "INCLUDE_NASDAQ_100",
+            "INCLUDE_RUSSELL_3000",
+            "INCLUDE_ETF_HOLDINGS",
+            "INCLUDE_REDDIT_IN_UNIVERSE",
+        ):
             os.environ.pop(key, None)
 
     def tearDown(self):
@@ -77,6 +93,46 @@ class V42SignalTests(unittest.TestCase):
         passed, details = quality_liquidity_filter("TEST", self._price_frame(start=20, trend=0.1))
         self.assertTrue(passed)
         self.assertGreater(details["liquidity_score"], 0)
+
+    def test_dynamic_universe_disabled_uses_manual_seed(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            summary = build_daily_universe({
+                "use_dynamic_universe": False,
+                "cache_dir": tmpdir,
+            })
+        self.assertIn("AAPL", summary["raw_universe"])
+        self.assertEqual(summary["raw_universe"], summary["stage1_quality_universe"])
+        self.assertEqual(summary["sources_used"]["manual_seed"], len(summary["raw_universe"]))
+
+    def test_ticker_normalization_replaces_dot_class_symbols(self):
+        self.assertEqual(normalize_ticker(" brk.b "), "BRK-B")
+
+    def test_universe_quality_filter_keeps_liquid_names(self):
+        class FakeTicker:
+            fast_info = {"market_cap": 5_000_000_000}
+            info = {"quoteType": "EQUITY"}
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("universe_builder._fetch_wikipedia_tickers", return_value=[]), \
+                 patch("universe_builder._fetch_iwv_holdings", return_value=[]), \
+                 patch("universe_builder._fetch_all_etf_holdings", return_value=[]), \
+                 patch("universe_builder._fetch_reddit_tickers", return_value=[]), \
+                 patch("universe_builder._fetch_earnings_calendar_symbols", return_value=[]), \
+                 patch("universe_builder._collect_high_momentum_tickers", return_value=[]), \
+                 patch("universe_builder.get_history", return_value=self._price_frame(start=25, trend=0.1)), \
+                 patch("universe_builder.get_ticker_obj", return_value=FakeTicker()):
+                summary = build_daily_universe({
+                    "use_dynamic_universe": True,
+                    "include_sp500": False,
+                    "include_nasdaq_100": False,
+                    "include_russell_3000": False,
+                    "include_etf_holdings": False,
+                    "include_reddit_in_universe": False,
+                    "target_stage1_size": 10,
+                    "cache_dir": tmpdir,
+                })
+        self.assertIn("AAPL", summary["stage1_quality_universe"])
+        self.assertLessEqual(len(summary["stage1_quality_universe"]), 10)
 
     def _price_frame(self, start=20.0, trend=0.2):
         dates = pd.date_range("2025-01-01", periods=220, freq="B")

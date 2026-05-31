@@ -33,7 +33,7 @@ STRATEGY_WEIGHTS = {
     "politician_trade": 0.01,
 }
 
-MIN_PRICE = 5.0
+MIN_PRICE = 10.0
 MIN_AVG_DAILY_VOLUME = 500_000
 
 BENCHMARKS = ["SPY", "QQQ"]

@@ -9,6 +9,7 @@ The bot stores recommendations in `predictions.csv`, evaluates prior picks again
 SPY, and updates `learning_state.json` so signal weights can adapt over time.
 
 Email sections:
+- Universe Summary
 - Top 10 Stocks
 - Top 5 Under $30
 - Top 5 Earnings Setups
@@ -38,8 +39,21 @@ Optional:
 - REDDIT_POST_LIMIT defaults to 30 posts per subreddit
 - BLEND_REDDIT_IN_MAIN_SCORE defaults to false and caps Reddit impact at 5 points
 - INCLUDE_HIGH_RISK_MICROCAPS defaults to false
-- MIN_STOCK_PRICE defaults to 5
+- USE_DYNAMIC_UNIVERSE defaults to true
+- MAX_RAW_UNIVERSE_SIZE defaults to 2000
+- TARGET_STAGE1_SIZE defaults to 500
+- TARGET_STAGE2_SIZE defaults to 100
+- TARGET_DEEP_ANALYSIS_SIZE defaults to 20
+- MIN_STOCK_PRICE defaults to 10
+- MIN_PRICE defaults to 10 for the dynamic universe quality filter
 - MIN_AVG_DAILY_VOLUME defaults to 500000
+- MIN_MARKET_CAP defaults to 1000000000
+- INCLUDE_MICROCAPS defaults to false
+- INCLUDE_REDDIT_IN_UNIVERSE defaults to true
+- INCLUDE_ETF_HOLDINGS defaults to true
+- INCLUDE_RUSSELL_3000 defaults to true
+- INCLUDE_SP500 defaults to true
+- INCLUDE_NASDAQ_100 defaults to true
 - GEMINI_MODEL defaults to gemini-2.5-flash
 - GEMINI_TIMEOUT_SECONDS defaults to 120
 - GEMINI_MAX_ATTEMPTS defaults to 2
@@ -47,10 +61,12 @@ Optional:
 - GEMINI_REDDIT_BATCH_SIZE defaults to 5
 
 The ranking funnel is:
-1. Quality/liquidity filter
-2. Opportunity score from technical, opening, volume, volatility, and options signals
-3. Catalyst score from news, analyst, earnings, insider, squeeze, and political signals
-4. Quality score from risk, fundamentals, institutional, pattern, and liquidity inputs
+1. Dynamic universe from manual seed, indexes, ETF holdings, Reddit, earnings, and momentum sources
+2. Quality/liquidity filter
+3. Stage 2 opportunity score from technical, opening, volume, volatility, ETF flow, and pattern signals
+4. Stage 3 medium-depth score from options, earnings, analyst, insider, institutional, squeeze, and political signals
+5. Stage 4 deep analysis using Finnhub overnight news and Gemini sentiment on the final deep-analysis candidates
+6. Market-regime weight adjustment and final top 10 ranking
 
 The politician-trade module has safe fallback behavior. If no API is configured, it checks the free Capitol Trades public site and keyword-based geopolitical catalysts.
 Not financial advice. For research only. Verify data before trading.
