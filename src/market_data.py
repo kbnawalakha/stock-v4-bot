@@ -1,3 +1,6 @@
+import contextlib
+import io
+
 import yfinance as yf
 import pandas as pd
 
@@ -12,7 +15,16 @@ def get_history(ticker: str, period: str = "1y") -> pd.DataFrame:
     if key in _FAILED_HISTORY:
         return pd.DataFrame()
 
-    df = yf.download(ticker, period=period, interval="1d", auto_adjust=True, progress=False, threads=False)
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        df = yf.download(
+            ticker,
+            period=period,
+            interval="1d",
+            auto_adjust=True,
+            progress=False,
+            threads=False,
+            repair=False,
+        )
     if df is None or df.empty:
         _FAILED_HISTORY.add(key)
         return pd.DataFrame()

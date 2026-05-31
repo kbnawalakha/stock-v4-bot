@@ -36,6 +36,7 @@ ETF_TICKERS = set(ETF_HOLDINGS) | {
 INVALID_SUFFIXES = (
     "W", "WS", "WT", "U", "UN", "R", "RT", "PR", "PRA", "PRB", "PRC", "PRD",
 )
+US_SHARE_CLASS_SUFFIXES = {"A", "B", "C"}
 
 WIKI_HEADERS = {
     "sp500": "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
@@ -443,8 +444,17 @@ def _normalize_many(tickers: list[str] | tuple[str, ...] | set[str], summary: di
 def _valid_common_stock_symbol(ticker: str) -> bool:
     if not re.match(r"^[A-Z][A-Z0-9-]{0,9}$", ticker):
         return False
-    suffix = ticker.split("-")[-1] if "-" in ticker else ""
-    if suffix in INVALID_SUFFIXES:
+    if "-" in ticker:
+        parts = ticker.split("-")
+        if len(parts) != 2:
+            return False
+        root, suffix = parts
+        if suffix not in US_SHARE_CLASS_SUFFIXES:
+            return False
+        if not 1 <= len(root) <= 5:
+            return False
+        return True
+    if len(ticker) == 5 and ticker[-1] in {"F", "Y"}:
         return False
     return True
 

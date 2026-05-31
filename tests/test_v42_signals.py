@@ -16,7 +16,7 @@ from main_v4 import quality_liquidity_filter
 from market_breadth import market_breadth_regime
 from scoring import apply_reddit_blend, regime_adjusted_weights
 from reddit_client import _fetch_subreddit_listing
-from universe_builder import build_daily_universe, normalize_ticker
+from universe_builder import build_daily_universe, normalize_ticker, _valid_common_stock_symbol
 from volatility_setup import volatility_setup_score
 from volume_accumulation import volume_accumulation_score
 
@@ -107,6 +107,14 @@ class V42SignalTests(unittest.TestCase):
 
     def test_ticker_normalization_replaces_dot_class_symbols(self):
         self.assertEqual(normalize_ticker(" brk.b "), "BRK-B")
+
+    def test_universe_rejects_foreign_and_otc_symbols(self):
+        self.assertTrue(_valid_common_stock_symbol("BRK-B"))
+        self.assertTrue(_valid_common_stock_symbol("NOW"))
+        self.assertFalse(_valid_common_stock_symbol("ABBN-SW"))
+        self.assertFalse(_valid_common_stock_symbol("CCO-TO"))
+        self.assertFalse(_valid_common_stock_symbol("PDN-AX"))
+        self.assertFalse(_valid_common_stock_symbol("APXIF"))
 
     def test_universe_quality_filter_keeps_liquid_names(self):
         class FakeTicker:
