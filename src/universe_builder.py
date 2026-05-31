@@ -48,6 +48,8 @@ ISHARES_IWV_HOLDINGS_URL = (
 )
 
 REQUEST_TIMEOUT_SECONDS = 20
+HIGH_MOMENTUM_SCAN_LIMIT = 300
+PROGRESS_LOG_INTERVAL = 25
 
 
 @dataclass(frozen=True)
@@ -98,28 +100,42 @@ def build_daily_universe(config: UniverseConfig | dict[str, Any] | None = None) 
 
     source_rows: list[tuple[str, str]] = []
     _extend_source(source_rows, "manual_seed", UNIVERSE, summary)
+    _log_event("universe_source_loaded", source="manual_seed", count=len(UNIVERSE), total_rows=len(source_rows))
 
     if cfg.include_sp500:
         _extend_source(source_rows, "sp500", _fetch_wikipedia_tickers("sp500", summary), summary)
+        _log_event("universe_source_loaded", source="sp500", count=summary["sources_used"].get("sp500", 0), total_rows=len(source_rows))
     if cfg.include_nasdaq_100:
         _extend_source(source_rows, "nasdaq100", _fetch_wikipedia_tickers("nasdaq100", summary), summary)
+        _log_event("universe_source_loaded", source="nasdaq100", count=summary["sources_used"].get("nasdaq100", 0), total_rows=len(source_rows))
     if cfg.include_russell_3000:
         _extend_source(source_rows, "russell3000_iwv", _fetch_iwv_holdings(summary), summary)
+        _log_event("universe_source_loaded", source="russell3000_iwv", count=summary["sources_used"].get("russell3000_iwv", 0), total_rows=len(source_rows))
     if cfg.include_etf_holdings:
         _extend_source(source_rows, "etf_holdings", _fetch_all_etf_holdings(summary), summary)
+        _log_event("universe_source_loaded", source="etf_holdings", count=summary["sources_used"].get("etf_holdings", 0), total_rows=len(source_rows))
     if cfg.include_reddit_in_universe:
         _extend_source(source_rows, "reddit_social", _fetch_reddit_tickers(source_rows, summary), summary)
+        _log_event("universe_source_loaded", source="reddit_social", count=summary["sources_used"].get("reddit_social", 0), total_rows=len(source_rows))
     _extend_source(source_rows, "earnings_calendar", _fetch_earnings_calendar_symbols(summary=summary), summary)
+    _log_event("universe_source_loaded", source="earnings_calendar", count=summary["sources_used"].get("earnings_calendar", 0), total_rows=len(source_rows))
 
     raw = _dedupe_and_filter(source_rows, cfg, summary)
     summary["raw_universe"] = raw[: cfg.max_raw_universe_size]
     summary["filtered_universe"] = list(summary["raw_universe"])
+    _log_event(
+        "universe_raw_filtered",
+        raw_count=len(summary["raw_universe"]),
+        removed=summary["removed"],
+        max_raw_universe_size=cfg.max_raw_universe_size,
+    )
 
     momentum = _collect_high_momentum_tickers(summary["filtered_universe"], summary)
     if momentum:
         _extend_source(source_rows, "high_momentum_daily_scan", momentum, summary)
         summary["filtered_universe"] = _dedupe_and_filter(source_rows, cfg, summary)[: cfg.max_raw_universe_size]
         summary["raw_universe"] = list(summary["filtered_universe"])
+        _log_event("universe_high_momentum_added", count=len(momentum), filtered_count=len(summary["filtered_universe"]))
 
     stage1 = _stage1_quality_filter(summary["filtered_universe"], cfg, summary)
     summary["stage1_quality_universe"] = stage1
@@ -230,7 +246,8 @@ def _dedupe_and_filter(source_rows: list[tuple[str, str]], cfg: UniverseConfig, 
 
 def _stage1_quality_filter(tickers: list[str], cfg: UniverseConfig, summary: dict[str, Any]) -> list[str]:
     accepted: list[tuple[float, str]] = []
-    for ticker in tickers:
+    _log_event("universe_stage1_quality_start", ticker_count=len(tickers), target_stage1_size=cfg.target_stage1_size)
+    for index, ticker in enumerate(tickers, start=1):
         try:
             df = get_history(ticker)
             if df.empty or len(df) < 120:
@@ -239,17 +256,17 @@ def _stage1_quality_filter(tickers: list[str], cfg: UniverseConfig, summary: dic
 
             price = float(df["Close"].iloc[-1])
             avg_volume = float(df["Volume"].tail(30).mean())
-            market_cap = _market_cap(ticker)
-            quote_type = _quote_type(ticker)
-
-            if not cfg.allow_etfs and quote_type in {"ETF", "MUTUALFUND", "INDEX"}:
-                summary["removed"]["etfs"] += 1
-                continue
             if price < cfg.min_price:
                 summary["removed"]["price"] += 1
                 continue
             if avg_volume < cfg.min_avg_daily_volume:
                 summary["removed"]["volume"] += 1
+                continue
+
+            market_cap = _market_cap(ticker)
+            quote_type = _quote_type(ticker)
+            if not cfg.allow_etfs and quote_type in {"ETF", "MUTUALFUND", "INDEX"}:
+                summary["removed"]["etfs"] += 1
                 continue
             if not cfg.include_microcaps and market_cap is not None and market_cap < cfg.min_market_cap:
                 summary["removed"]["market_cap"] += 1
@@ -263,10 +280,20 @@ def _stage1_quality_filter(tickers: list[str], cfg: UniverseConfig, summary: dic
             summary["errors"].append({"source": "stage1_quality", "ticker": ticker, "error": str(exc)})
             summary["removed"]["quality"] += 1
             continue
+        finally:
+            if index == 1 or index % PROGRESS_LOG_INTERVAL == 0 or index == len(tickers):
+                _log_event(
+                    "universe_stage1_quality_progress",
+                    processed=index,
+                    total=len(tickers),
+                    accepted=len(accepted),
+                    removed=summary["removed"],
+                )
 
     accepted = sorted(accepted, key=lambda item: item[0], reverse=True)
     stage1 = [ticker for _, ticker in accepted[: cfg.target_stage1_size]]
     summary["removed"]["quality"] += max(0, len(tickers) - len(stage1))
+    _log_event("universe_stage1_quality_done", accepted=len(accepted), selected=len(stage1), removed=summary["removed"])
     return stage1
 
 
@@ -312,9 +339,11 @@ def _fetch_iwv_holdings(summary: dict[str, Any]) -> list[str]:
 
 def _fetch_all_etf_holdings(summary: dict[str, Any]) -> list[str]:
     tickers: set[str] = set()
-    for etf in ETF_HOLDINGS:
+    _log_event("universe_etf_holdings_start", etf_count=len(ETF_HOLDINGS))
+    for index, etf in enumerate(ETF_HOLDINGS, start=1):
         holdings = _fetch_yfinance_etf_holdings(etf, summary)
         tickers.update(holdings)
+        _log_event("universe_etf_holdings_progress", etf=etf, processed=index, total=len(ETF_HOLDINGS), holdings_count=len(holdings), unique_count=len(tickers))
     return sorted(tickers)
 
 
@@ -345,7 +374,10 @@ def _fetch_reddit_tickers(source_rows: list[tuple[str, str]], summary: dict[str,
 
 def _collect_high_momentum_tickers(tickers: list[str], summary: dict[str, Any]) -> list[str]:
     ranked: list[tuple[float, str]] = []
-    for ticker in tickers[:300]:
+    scan_limit = _env_int("HIGH_MOMENTUM_SCAN_LIMIT", HIGH_MOMENTUM_SCAN_LIMIT)
+    scan_tickers = tickers[: max(0, scan_limit)]
+    _log_event("universe_high_momentum_scan_start", ticker_count=len(scan_tickers), configured_limit=scan_limit)
+    for index, ticker in enumerate(scan_tickers, start=1):
         try:
             df = get_history(ticker)
             if df.empty or len(df) < 60:
@@ -359,7 +391,17 @@ def _collect_high_momentum_tickers(tickers: list[str], summary: dict[str, Any]) 
                 ranked.append((score, ticker))
         except Exception as exc:
             summary["errors"].append({"source": "high_momentum_daily_scan", "ticker": ticker, "error": str(exc)})
-    return [ticker for _, ticker in sorted(ranked, reverse=True)[:150]]
+        finally:
+            if index == 1 or index % PROGRESS_LOG_INTERVAL == 0 or index == len(scan_tickers):
+                _log_event(
+                    "universe_high_momentum_scan_progress",
+                    processed=index,
+                    total=len(scan_tickers),
+                    matches=len(ranked),
+                )
+    result = [ticker for _, ticker in sorted(ranked, reverse=True)[:150]]
+    _log_event("universe_high_momentum_scan_done", scanned=len(scan_tickers), selected=len(result))
+    return result
 
 
 def _fetch_earnings_calendar_symbols(summary: dict[str, Any], days_ahead: int = 14) -> list[str]:
@@ -451,16 +493,23 @@ def _write_snapshot(cfg: UniverseConfig, summary: dict[str, Any]) -> None:
 
 
 def _log_universe_summary(summary: dict[str, Any]) -> None:
+    _log_event(
+        "universe_summary",
+        raw_count=len(summary.get("raw_universe", [])),
+        filtered_count=len(summary.get("filtered_universe", [])),
+        stage1_count=len(summary.get("stage1_quality_universe", [])),
+        sources_used=summary.get("sources_used", {}),
+        removed=summary.get("removed", {}),
+        snapshot_path=summary.get("snapshot_path", ""),
+        error_count=len(summary.get("errors", [])),
+    )
+
+
+def _log_event(event: str, **payload: Any) -> None:
     logger.info(json.dumps({
-        "event": "universe_summary",
-        "raw_count": len(summary.get("raw_universe", [])),
-        "filtered_count": len(summary.get("filtered_universe", [])),
-        "stage1_count": len(summary.get("stage1_quality_universe", [])),
-        "sources_used": summary.get("sources_used", {}),
-        "removed": summary.get("removed", {}),
-        "snapshot_path": summary.get("snapshot_path", ""),
-        "error_count": len(summary.get("errors", [])),
-    }))
+        "event": event,
+        **payload,
+    }, default=str))
 
 
 def _env_bool(name: str, default: bool) -> bool:

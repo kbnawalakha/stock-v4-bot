@@ -44,6 +44,7 @@ Optional:
 - TARGET_STAGE1_SIZE defaults to 500
 - TARGET_STAGE2_SIZE defaults to 100
 - TARGET_DEEP_ANALYSIS_SIZE defaults to 20
+- HIGH_MOMENTUM_SCAN_LIMIT defaults to 300
 - MIN_STOCK_PRICE defaults to 10
 - MIN_PRICE defaults to 10 for the dynamic universe quality filter
 - MIN_AVG_DAILY_VOLUME defaults to 500000

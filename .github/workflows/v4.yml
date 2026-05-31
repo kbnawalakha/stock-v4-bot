@@ -44,6 +44,7 @@ jobs:
           TARGET_STAGE1_SIZE: ${{ secrets.TARGET_STAGE1_SIZE }}
           TARGET_STAGE2_SIZE: ${{ secrets.TARGET_STAGE2_SIZE }}
           TARGET_DEEP_ANALYSIS_SIZE: ${{ secrets.TARGET_DEEP_ANALYSIS_SIZE }}
+          HIGH_MOMENTUM_SCAN_LIMIT: ${{ secrets.HIGH_MOMENTUM_SCAN_LIMIT }}
           MIN_PRICE: ${{ secrets.MIN_PRICE }}
           MIN_MARKET_CAP: ${{ secrets.MIN_MARKET_CAP }}
           INCLUDE_MICROCAPS: ${{ secrets.INCLUDE_MICROCAPS }}
