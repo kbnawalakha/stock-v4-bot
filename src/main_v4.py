@@ -76,6 +76,10 @@ def upside_reason(row: dict, reason_mode: str = "normal") -> str:
         drivers.append("buyers showed up early with strong opening activity")
     elif row.get("opening_activity", 0) >= 55:
         drivers.append("opening activity is supportive")
+    if row.get("pre_market_activity", 0) >= 70:
+        drivers.append("pre-market action is bullish")
+    if row.get("post_market_activity", 0) >= 70:
+        drivers.append("post-market action was bullish")
 
     if row.get("news_sentiment", 0) >= 70:
         drivers.append("overnight news sentiment is bullish")
@@ -124,6 +128,8 @@ def top_drivers(row: dict) -> list[str]:
     candidates = []
     checks = [
         ("opening_activity", "strong opening activity"),
+        ("pre_market_activity", "bullish pre-market activity"),
+        ("post_market_activity", "bullish post-market activity"),
         ("news_sentiment", "bullish news sentiment"),
         ("options_flow", "bullish options flow"),
         ("volume_accumulation", "accumulation on volume"),
@@ -358,6 +364,8 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
                 "politician_trade": 0.0,
                 "risk_quality": risk_quality_score(df),
                 "opening_activity": opening["score"],
+                "pre_market_activity": opening.get("pre_market_activity", 50.0),
+                "post_market_activity": opening.get("post_market_activity", 50.0),
                 "earnings": 50.0,
                 "earnings_quality": 50.0,
                 "options_flow": 50.0,
@@ -410,6 +418,8 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
                 ticker=ticker,
                 score=row["score"],
                 opening=row["opening_activity"],
+                pre_market=row["pre_market_activity"],
+                post_market=row["post_market_activity"],
                 trend=row["trend"],
                 relative_strength=row["relative_strength"],
                 sector_strength=row["sector_strength"],
@@ -571,11 +581,13 @@ def html_table(title, rows, reason_mode="normal"):
       <tr style="background:#f2f2f2;">
         <th align="left" style="border:1px solid #ddd;">Ticker</th>
         <th align="right" style="border:1px solid #ddd;">Opening</th>
+        <th align="right" style="border:1px solid #ddd;">Pre</th>
+        <th align="right" style="border:1px solid #ddd;">Post</th>
         <th align="left" style="border:1px solid #ddd;">Reason</th>
       </tr>
     """
     if not rows:
-        html += '<tr><td colspan="3" style="border:1px solid #ddd;">No matching setups today.</td></tr>'
+        html += '<tr><td colspan="5" style="border:1px solid #ddd;">No matching setups today.</td></tr>'
 
     for r in rows:
         ticker_cell = f"<b>{r['ticker']}</b><br><span style='color:#666;'>${r['price']:.2f}</span>"
@@ -585,6 +597,8 @@ def html_table(title, rows, reason_mode="normal"):
         <tr>
           <td style="border:1px solid #ddd;vertical-align:top;width:18%;">{ticker_cell}</td>
           <td align="right" style="border:1px solid #ddd;vertical-align:top;width:12%;">{r.get('opening_activity', 0):.0f}</td>
+          <td align="right" style="border:1px solid #ddd;vertical-align:top;width:10%;">{r.get('pre_market_activity', 0):.0f}</td>
+          <td align="right" style="border:1px solid #ddd;vertical-align:top;width:10%;">{r.get('post_market_activity', 0):.0f}</td>
           <td style="border:1px solid #ddd;vertical-align:top;">{reason}</td>
         </tr>
         """
@@ -600,13 +614,15 @@ def html_top10_table(rows):
         <th align="left" style="border:1px solid #ddd;">Ticker</th>
         <th align="right" style="border:1px solid #ddd;">Score</th>
         <th align="right" style="border:1px solid #ddd;">Opportunity</th>
+        <th align="right" style="border:1px solid #ddd;">Pre</th>
+        <th align="right" style="border:1px solid #ddd;">Post</th>
         <th align="right" style="border:1px solid #ddd;">Catalyst</th>
         <th align="right" style="border:1px solid #ddd;">Quality</th>
         <th align="left" style="border:1px solid #ddd;">Drivers / Risks</th>
       </tr>
     """
     if not rows:
-        html += '<tr><td colspan="6" style="border:1px solid #ddd;">No matching setups today.</td></tr>'
+        html += '<tr><td colspan="8" style="border:1px solid #ddd;">No matching setups today.</td></tr>'
 
     for row in rows:
         drivers = "<br>".join(escape(item) for item in row.get("top_drivers", top_drivers(row))[:3])
@@ -618,6 +634,8 @@ def html_top10_table(rows):
           <td style="border:1px solid #ddd;vertical-align:top;"><b>{escape(row["ticker"])}</b><br><span style="color:#666;">${row["price"]:.2f}</span></td>
           <td align="right" style="border:1px solid #ddd;vertical-align:top;">{row.get("score", 0):.0f}</td>
           <td align="right" style="border:1px solid #ddd;vertical-align:top;">{row.get("opportunity_score", 0):.0f}</td>
+          <td align="right" style="border:1px solid #ddd;vertical-align:top;">{row.get("pre_market_activity", 0):.0f}</td>
+          <td align="right" style="border:1px solid #ddd;vertical-align:top;">{row.get("post_market_activity", 0):.0f}</td>
           <td align="right" style="border:1px solid #ddd;vertical-align:top;">{row.get("catalyst_score", 0):.0f}</td>
           <td align="right" style="border:1px solid #ddd;vertical-align:top;">{row.get("quality_score", 0):.0f}</td>
           <td style="border:1px solid #ddd;vertical-align:top;">
@@ -824,6 +842,7 @@ def build_email(results, spy_df, qqq_df, regime, sector_extremes, reddit_plays, 
     for r in top_10:
         text += (
             f"{r['ticker']} | Score {r.get('score', 0):.0f} | Opportunity {r.get('opportunity_score', 0):.0f} | "
+            f"Pre {r.get('pre_market_activity', 0):.0f} | Post {r.get('post_market_activity', 0):.0f} | "
             f"Catalyst {r.get('catalyst_score', 0):.0f} | Quality {r.get('quality_score', 0):.0f}\n"
             f"Drivers: {', '.join(r.get('top_drivers', top_drivers(r))[:3])}\n"
             f"Risks: {', '.join(r.get('top_risks', top_risks(r))[:2])}\n"
@@ -840,7 +859,8 @@ def build_email(results, spy_df, qqq_df, regime, sector_extremes, reddit_plays, 
         text += f"\n{title}\n"
         for r in rows:
             text += (
-                f"{r['ticker']} | Opening {r.get('opening_activity', 0):.0f}\n"
+                f"{r['ticker']} | Opening {r.get('opening_activity', 0):.0f} | "
+                f"Pre {r.get('pre_market_activity', 0):.0f} | Post {r.get('post_market_activity', 0):.0f}\n"
                 f"Reason: {upside_reason(r, mode)}\n"
             )
 

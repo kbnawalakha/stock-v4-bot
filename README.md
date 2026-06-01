@@ -1,7 +1,7 @@
 # Stock V4.2 Bot - Multi-Signal Catalyst Edition
 
 Daily stock signal bot with regime-aware ranking, overnight Gemini sentiment,
-opening activity, options flow, earnings, catalyst, institutional ownership,
+pre-market activity, post-market activity, opening activity, options flow, earnings, catalyst, institutional ownership,
 institutional ownership change, analyst revisions, fundamentals momentum,
 volume accumulation, insider buying, short squeeze potential, volatility setup,
 ETF flow exposure proxy, daily/weekly trading patterns, Reddit watchlists, and political/geopolitical signals.
@@ -64,7 +64,7 @@ Optional:
 The ranking funnel is:
 1. Dynamic universe from manual seed, indexes, ETF holdings, Reddit, earnings, and momentum sources
 2. Quality/liquidity filter
-3. Stage 2 opportunity score from technical, opening, volume, volatility, ETF flow, and pattern signals
+3. Stage 2 opportunity score from technical, pre-market, post-market, opening, volume, volatility, ETF flow, and pattern signals
 4. Stage 3 medium-depth score from options, earnings, analyst, insider, institutional, squeeze, and political signals
 5. Stage 4 deep analysis using Finnhub overnight news and Gemini sentiment on the final deep-analysis candidates
 6. Market-regime weight adjustment and final top 10 ranking

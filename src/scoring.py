@@ -34,6 +34,8 @@ def opportunity_score(row: dict, weights: dict[str, float] | None = None) -> flo
         (signed_to_percent(row.get("relative_strength", 0.0)), weights.get("relative_strength", 0.08)),
         (signed_to_percent(row.get("sector_strength", 0.0)), weights.get("sector_strength", 0.06)),
         (row.get("opening_activity", 50.0), weights.get("opening_activity", 0.12)),
+        (row.get("pre_market_activity", 50.0), weights.get("pre_market_activity", 0.04)),
+        (row.get("post_market_activity", 50.0), weights.get("post_market_activity", 0.03)),
         (row.get("volume_accumulation", 50.0), weights.get("volume_accumulation", 0.08)),
         (row.get("volatility_setup", 50.0), weights.get("volatility_setup", 0.06)),
         (row.get("options_flow", 50.0), weights.get("options_flow", 0.08)),

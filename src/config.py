@@ -15,6 +15,8 @@ POLITICAL_N = 5
 
 STRATEGY_WEIGHTS = {
     "opening_activity": 0.12,
+    "pre_market_activity": 0.04,
+    "post_market_activity": 0.03,
     "news_sentiment": 0.13,
     "trend": 0.10,
     "relative_strength": 0.08,

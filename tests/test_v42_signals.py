@@ -15,6 +15,7 @@ from insider_buying import insider_buying_score
 from fmp_client import FMPClient
 from main_v4 import quality_liquidity_filter
 from market_breadth import market_breadth_regime
+from opening_activity import _session_activity_score
 from scoring import apply_reddit_blend, regime_adjusted_weights
 from reddit_client import _fetch_subreddit_listing
 from universe_builder import build_daily_universe, normalize_ticker, _valid_common_stock_symbol
@@ -191,6 +192,13 @@ class V42SignalTests(unittest.TestCase):
         self.assertIsNone(client.get("/v4/insider-trading"))
         self.assertEqual(session.calls, 1)
 
+    def test_extended_hours_session_score_detects_activity(self):
+        df = self._intraday_frame()
+        result = _session_activity_score(df, df.index[-1].date(), "04:00", "09:29", "pre_market")
+        self.assertEqual(result["pre_market_data_available"], 1.0)
+        self.assertGreater(result["pre_market_activity"], 50.0)
+        self.assertGreater(result["pre_market_raw_return_pct"], 0.0)
+
     def _price_frame(self, start=20.0, trend=0.2):
         dates = pd.date_range("2025-01-01", periods=220, freq="B")
         close = pd.Series([start + i * trend for i in range(220)], index=dates)
@@ -201,6 +209,26 @@ class V42SignalTests(unittest.TestCase):
         open_ = close.shift(1).fillna(close.iloc[0])
         volume = pd.Series([1_000_000 + i * 1000 for i in range(220)], index=dates)
         return pd.DataFrame({"Open": open_, "High": high, "Low": low, "Close": close, "Volume": volume})
+
+    def _intraday_frame(self):
+        rows = []
+        for day, base_price, volume in [
+            ("2026-05-28", 20.0, 1000),
+            ("2026-05-29", 21.0, 3000),
+        ]:
+            for minute, price_step in [("04:00", 0.0), ("05:00", 0.2), ("09:29", 0.5)]:
+                timestamp = pd.Timestamp(f"{day} {minute}", tz="America/New_York")
+                close = base_price + price_step
+                rows.append({
+                    "timestamp": timestamp,
+                    "Open": base_price,
+                    "High": close * 1.01,
+                    "Low": close * 0.99,
+                    "Close": close,
+                    "Volume": volume,
+                })
+        df = pd.DataFrame(rows).set_index("timestamp")
+        return df
 
 
 if __name__ == "__main__":

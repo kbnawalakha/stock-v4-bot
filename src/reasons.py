@@ -13,6 +13,10 @@ def why_buy(row: dict, is_earnings: bool = False, is_catalyst: bool = False) -> 
         reasons.append("breakout setup")
     if row.get("opening_activity", 0) >= 70:
         reasons.append("positive opening volume spike")
+    if row.get("pre_market_activity", 0) >= 70:
+        reasons.append("bullish pre-market activity")
+    if row.get("post_market_activity", 0) >= 70:
+        reasons.append("bullish post-market activity")
     if row.get("options_flow", 0) >= 70:
         reasons.append("bullish options activity")
     if row.get("earnings", 0) >= 70:

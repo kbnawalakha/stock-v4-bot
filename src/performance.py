@@ -16,7 +16,7 @@ def log_predictions(rows: list[dict]) -> None:
 
     cols = [
         "date", "ticker", "price", "score", "opportunity_score", "catalyst_score", "quality_score",
-        "opening_activity", "news_sentiment",
+        "opening_activity", "pre_market_activity", "post_market_activity", "news_sentiment",
         "trend", "relative_strength", "sector_strength", "breakout", "options_flow",
         "earnings", "earnings_quality", "analyst_revisions", "fundamental_momentum",
         "volume_accumulation", "short_squeeze", "insider_buying", "volatility_setup",
