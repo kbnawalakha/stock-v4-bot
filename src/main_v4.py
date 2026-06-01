@@ -8,6 +8,8 @@ from zoneinfo import ZoneInfo
 from config import (
     UNIVERSE,
     TOP_N,
+    MAX_RECOMMENDATIONS,
+    BEAR_CASE_N,
     UNDER_30_N,
     EARNINGS_N,
     CATALYST_N,
@@ -53,6 +55,7 @@ from scoring import (
 )
 from short_squeeze import short_squeeze_score
 from signal_utils import signed_to_percent
+from swing_trading import bear_case_score, swing_trading_score
 from volatility_setup import volatility_setup_score
 from volume_accumulation import volume_accumulation_score
 from universe_builder import build_daily_universe, universe_config, update_universe_stages
@@ -91,6 +94,8 @@ def upside_reason(row: dict, reason_mode: str = "normal") -> str:
             drivers.append(patterns[0])
         else:
             drivers.append("daily and weekly trading patterns are constructive")
+    if row.get("swing_setup", 0) >= 70:
+        drivers.append(row.get("swing_details", {}).get("setup_type", "swing setup is constructive"))
     if row.get("institutional_ownership", 0) >= 70:
         drivers.append(row.get("institutional_details", {}).get("reason", "institutional ownership is supportive"))
     if row.get("etf_flow_exposure", 50) >= 70:
@@ -140,6 +145,7 @@ def top_drivers(row: dict) -> list[str]:
         ("insider_buying", "insider buying signal"),
         ("institutional_ownership", "institutional support"),
         ("pattern_trading", "constructive trading pattern"),
+        ("swing_setup", "high-quality swing setup"),
         ("etf_flow_exposure", "supportive sector ETF flow proxy"),
     ]
     for key, label in checks:
@@ -155,6 +161,8 @@ def top_risks(row: dict) -> list[str]:
         risks.append("liquidity is thinner than preferred")
     if row.get("risk_quality", 100) < 45:
         risks.append("volatility/risk quality is weak")
+    if row.get("swing_setup", 50) < 45:
+        risks.append(row.get("swing_details", {}).get("reason", "swing setup is weak"))
     if row.get("earnings_quality", 50) < 40:
         risks.append("earnings quality is soft")
     if row.get("analyst_revisions", 50) < 40:
@@ -162,6 +170,38 @@ def top_risks(row: dict) -> list[str]:
     if row.get("news_sentiment", 50) < 45:
         risks.append("news sentiment is not supportive")
     return risks[:2] or ["no major model risk flagged"]
+
+
+def recommendation_confidence(row: dict, regime: dict | None = None) -> float:
+    regime = regime or {}
+    data_bonus = 0.0
+    if row.get("sentiment_confidence", 0) > 0:
+        data_bonus += min(10.0, float(row.get("sentiment_confidence", 0)) * 10)
+    if row.get("swing_details", {}).get("risk_reward", 0) >= 1.5:
+        data_bonus += 8.0
+    if row.get("pre_market_activity", 50) != 50 or row.get("post_market_activity", 50) != 50:
+        data_bonus += 4.0
+    confidence = (
+        row.get("score", 0) * 0.35
+        + row.get("swing_setup", 50) * 0.25
+        + row.get("quality_score", 50) * 0.15
+        + row.get("risk_quality", 50) * 0.10
+        + row.get("catalyst_score", 50) * 0.10
+        + float(regime.get("confidence", 0.5)) * 5.0
+        + data_bonus
+    )
+    return max(0.0, min(100.0, float(confidence)))
+
+
+def env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or str(raw).strip() == "":
+        return int(default)
+    try:
+        return int(float(raw))
+    except (TypeError, ValueError):
+        log_event("invalid_int_env", name=name, value=raw, default=default)
+        return int(default)
 
 
 def sector_extreme_signals(spy_df, qqq_df) -> list[dict]:
@@ -299,6 +339,7 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
     sector_cache = {}
     universe_price_data = {}
     stage2_rows = []
+    bear_candidates = []
     missing_api_warnings = [name for name in OPTIONAL_API_ENVS if not os.getenv(name)]
     cfg = universe_config()
     try:
@@ -344,11 +385,16 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
 
             opening = opening_activity_score(ticker)
             patterns = pattern_trading_score(df)
+            swing = swing_trading_score(df)
+            bear = bear_case_score(df)
             volume = volume_accumulation_score(ticker, df)
             volatility = volatility_setup_score(ticker, df)
             etf_flow = etf_flow_exposure_score(ticker, sector_ticker, sector_df)
             log_event("opening_activity_score", ticker=ticker, **opening)
             log_event("pattern_trading_score", ticker=ticker, **patterns)
+            log_event("swing_trading_score", ticker=ticker, **swing)
+            if bear.get("score", 0) >= 65:
+                log_event("bear_case_score", ticker=ticker, **bear)
             log_event("volume_accumulation_score", ticker=ticker, **volume)
             log_event("volatility_setup_score", ticker=ticker, **volatility)
             log_event("etf_flow_exposure_score", ticker=ticker, **etf_flow)
@@ -371,6 +417,8 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
                 "options_flow": 50.0,
                 "institutional_ownership": 50.0,
                 "pattern_trading": patterns["score"],
+                "swing_setup": swing["score"],
+                "swing_risk_reward": max(0.0, min(100.0, float(swing.get("risk_reward", 0.0)) * 25.0)),
                 "earnings_proximity": 0.0,
                 "analyst_revisions": 50.0,
                 "fundamental_momentum": 50.0,
@@ -395,6 +443,8 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
                 "options_details": {},
                 "institutional_details": {},
                 "pattern_details": patterns,
+                "swing_details": swing,
+                "bear_case_details": bear,
                 "analyst_details": {},
                 "fundamental_details": {},
                 "volume_details": volume,
@@ -413,6 +463,19 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
             row["earnings_score"] = earnings_setup_score(row)
             row["catalyst_watch_score"] = catalyst_watch_score(row)
             stage2_rows.append(row)
+            if bear.get("score", 0) >= 65:
+                bear_row = {
+                    "ticker": ticker,
+                    "price": quality_details.get("price", 0.0),
+                    "bear_score": bear["score"],
+                    "setup_type": bear.get("setup_type", ""),
+                    "reason": bear.get("reason", ""),
+                    "trend": features["trend"],
+                    "relative_strength": features["relative_strength"],
+                    "sector_strength": features["sector_strength"],
+                    "risk_quality": features["risk_quality"],
+                }
+                bear_candidates.append(bear_row)
             log_event(
                 "stage2_candidate_score",
                 ticker=ticker,
@@ -425,6 +488,8 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
                 sector_strength=row["sector_strength"],
                 breakout=row["breakout"],
                 pattern=row["pattern_trading"],
+                swing=row["swing_setup"],
+                swing_rr=row["swing_details"].get("risk_reward"),
                 opportunity=row["opportunity_score"],
                 quality=row["quality_score"],
             )
@@ -433,6 +498,8 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
             continue
 
     stage2_ranked = sorted(stage2_rows, key=lambda x: x["score"], reverse=True)[: cfg.target_stage2_size]
+    bear_cases = sorted(bear_candidates, key=lambda x: x["bear_score"], reverse=True)[:BEAR_CASE_N]
+    log_event("top_bear_cases", count=len(bear_cases), tickers=[r["ticker"] for r in bear_cases])
     update_universe_stages(universe_summary, stage2=[r["ticker"] for r in stage2_ranked])
     log_event(
         "stage2_opportunity_candidates",
@@ -564,14 +631,25 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
         row["score"] = apply_reddit_blend(row["score"], row, reddit_by_ticker, blend_reddit)
         row["earnings_score"] = earnings_setup_score(row)
         row["catalyst_watch_score"] = catalyst_watch_score(row)
+        row["recommendation_confidence"] = recommendation_confidence(row, regime)
         row["top_drivers"] = top_drivers(row)
         row["top_risks"] = top_risks(row)
 
-    final_results = sorted(top_20, key=lambda x: x["score"], reverse=True)
-    update_universe_stages(universe_summary, final_top_10=[r["ticker"] for r in final_results[:TOP_N]])
-    log_event("final_top_10", tickers=[r["ticker"] for r in final_results[:TOP_N]])
+    min_confidence = env_float("MIN_RECOMMENDATION_CONFIDENCE", 55.0)
+    max_recommendations = env_int("MAX_RECOMMENDATIONS", MAX_RECOMMENDATIONS)
+    ranked_final = sorted(top_20, key=lambda x: (x.get("recommendation_confidence", 0), x["score"]), reverse=True)
+    final_results = [row for row in ranked_final if row.get("recommendation_confidence", 0) >= min_confidence][:max_recommendations]
+    update_universe_stages(universe_summary, final_top_10=[r["ticker"] for r in final_results])
+    log_event(
+        "final_recommendations",
+        count=len(final_results),
+        min_confidence=min_confidence,
+        max_recommendations=max_recommendations,
+        tickers=[r["ticker"] for r in final_results],
+        excluded_low_confidence=[r["ticker"] for r in ranked_final if r.get("recommendation_confidence", 0) < min_confidence],
+    )
     sectors = sector_extreme_signals(spy_df, qqq_df)
-    return final_results, spy_df, qqq_df, regime, sectors, reddit_plays, universe_summary
+    return final_results, spy_df, qqq_df, regime, sectors, reddit_plays, universe_summary, bear_cases
 
 
 def html_table(title, rows, reason_mode="normal"):
@@ -583,11 +661,12 @@ def html_table(title, rows, reason_mode="normal"):
         <th align="right" style="border:1px solid #ddd;">Opening</th>
         <th align="right" style="border:1px solid #ddd;">Pre</th>
         <th align="right" style="border:1px solid #ddd;">Post</th>
+        <th align="right" style="border:1px solid #ddd;">Swing</th>
         <th align="left" style="border:1px solid #ddd;">Reason</th>
       </tr>
     """
     if not rows:
-        html += '<tr><td colspan="5" style="border:1px solid #ddd;">No matching setups today.</td></tr>'
+        html += '<tr><td colspan="6" style="border:1px solid #ddd;">No matching setups today.</td></tr>'
 
     for r in rows:
         ticker_cell = f"<b>{r['ticker']}</b><br><span style='color:#666;'>${r['price']:.2f}</span>"
@@ -599,6 +678,7 @@ def html_table(title, rows, reason_mode="normal"):
           <td align="right" style="border:1px solid #ddd;vertical-align:top;width:12%;">{r.get('opening_activity', 0):.0f}</td>
           <td align="right" style="border:1px solid #ddd;vertical-align:top;width:10%;">{r.get('pre_market_activity', 0):.0f}</td>
           <td align="right" style="border:1px solid #ddd;vertical-align:top;width:10%;">{r.get('post_market_activity', 0):.0f}</td>
+          <td align="right" style="border:1px solid #ddd;vertical-align:top;width:10%;">{r.get('swing_setup', 0):.0f}</td>
           <td style="border:1px solid #ddd;vertical-align:top;">{reason}</td>
         </tr>
         """
@@ -608,21 +688,23 @@ def html_table(title, rows, reason_mode="normal"):
 
 def html_top10_table(rows):
     html = """
-    <h2 style="margin-top:28px;border-bottom:2px solid #222;padding-bottom:6px;">Top 10 Stocks</h2>
+    <h2 style="margin-top:28px;border-bottom:2px solid #222;padding-bottom:6px;">Recommendations</h2>
     <table width="100%" cellpadding="8" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px;">
       <tr style="background:#f2f2f2;">
         <th align="left" style="border:1px solid #ddd;">Ticker</th>
         <th align="right" style="border:1px solid #ddd;">Score</th>
+        <th align="right" style="border:1px solid #ddd;">Conf</th>
         <th align="right" style="border:1px solid #ddd;">Opportunity</th>
         <th align="right" style="border:1px solid #ddd;">Pre</th>
         <th align="right" style="border:1px solid #ddd;">Post</th>
+        <th align="right" style="border:1px solid #ddd;">Swing</th>
         <th align="right" style="border:1px solid #ddd;">Catalyst</th>
         <th align="right" style="border:1px solid #ddd;">Quality</th>
         <th align="left" style="border:1px solid #ddd;">Drivers / Risks</th>
       </tr>
     """
     if not rows:
-        html += '<tr><td colspan="8" style="border:1px solid #ddd;">No matching setups today.</td></tr>'
+        html += '<tr><td colspan="10" style="border:1px solid #ddd;">No high-confidence recommendations today.</td></tr>'
 
     for row in rows:
         drivers = "<br>".join(escape(item) for item in row.get("top_drivers", top_drivers(row))[:3])
@@ -633,17 +715,46 @@ def html_top10_table(rows):
         <tr>
           <td style="border:1px solid #ddd;vertical-align:top;"><b>{escape(row["ticker"])}</b><br><span style="color:#666;">${row["price"]:.2f}</span></td>
           <td align="right" style="border:1px solid #ddd;vertical-align:top;">{row.get("score", 0):.0f}</td>
+          <td align="right" style="border:1px solid #ddd;vertical-align:top;">{row.get("recommendation_confidence", 0):.0f}</td>
           <td align="right" style="border:1px solid #ddd;vertical-align:top;">{row.get("opportunity_score", 0):.0f}</td>
           <td align="right" style="border:1px solid #ddd;vertical-align:top;">{row.get("pre_market_activity", 0):.0f}</td>
           <td align="right" style="border:1px solid #ddd;vertical-align:top;">{row.get("post_market_activity", 0):.0f}</td>
+          <td align="right" style="border:1px solid #ddd;vertical-align:top;">{row.get("swing_setup", 0):.0f}</td>
           <td align="right" style="border:1px solid #ddd;vertical-align:top;">{row.get("catalyst_score", 0):.0f}</td>
           <td align="right" style="border:1px solid #ddd;vertical-align:top;">{row.get("quality_score", 0):.0f}</td>
           <td style="border:1px solid #ddd;vertical-align:top;">
             <b>Drivers</b><br>{drivers}<br>
             <b>Risks</b><br>{risks}<br>
             <span style="color:#666;">Freshness: {freshness}</span><br>
+            <span style="color:#666;">Swing: {escape(str(row.get("swing_details", {}).get("setup_type", "n/a")))} | Stop: ${float(row.get("swing_details", {}).get("stop_loss", 0)):.2f} | Target: ${float(row.get("swing_details", {}).get("target_price", 0)):.2f}</span><br>
             <span style="color:#999;">Missing data: {warning}</span>
           </td>
+        </tr>
+        """
+    html += "</table>"
+    return html
+
+
+def html_bear_cases(rows):
+    html = """
+    <h2 style="margin-top:28px;border-bottom:2px solid #222;padding-bottom:6px;">Strong Bear Cases</h2>
+    <table width="100%" cellpadding="8" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px;">
+      <tr style="background:#f2f2f2;">
+        <th align="left" style="border:1px solid #ddd;">Ticker</th>
+        <th align="right" style="border:1px solid #ddd;">Bear</th>
+        <th align="left" style="border:1px solid #ddd;">Setup</th>
+        <th align="left" style="border:1px solid #ddd;">Reason</th>
+      </tr>
+    """
+    if not rows:
+        html += '<tr><td colspan="4" style="border:1px solid #ddd;">No strong bearish swing cases today.</td></tr>'
+    for row in rows:
+        html += f"""
+        <tr>
+          <td style="border:1px solid #ddd;vertical-align:top;"><b>{escape(row["ticker"])}</b><br><span style="color:#666;">${float(row.get("price", 0)):.2f}</span></td>
+          <td align="right" style="border:1px solid #ddd;vertical-align:top;">{float(row.get("bear_score", 0)):.0f}</td>
+          <td style="border:1px solid #ddd;vertical-align:top;">{escape(str(row.get("setup_type", "")))}</td>
+          <td style="border:1px solid #ddd;vertical-align:top;">{escape(str(row.get("reason", "")))}</td>
         </tr>
         """
     html += "</table>"
@@ -762,12 +873,12 @@ def universe_summary_text(summary):
     return "\n".join(lines) + "\n"
 
 
-def build_email(results, spy_df, qqq_df, regime, sector_extremes, reddit_plays, universe_summary=None):
+def build_email(results, spy_df, qqq_df, regime, sector_extremes, reddit_plays, universe_summary=None, bear_cases=None):
     now_pt = datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%Y-%m-%d %I:%M %p %Z")
     spy_20 = pct_return(spy_df, 20)
     qqq_20 = pct_return(qqq_df, 20)
 
-    top_10 = results[:TOP_N]
+    top_10 = results
     under_30 = [r for r in results if r["price"] < 30][:UNDER_30_N]
     earnings = sorted(
         [r for r in results if r.get("days_to_earnings") is not None and 0 <= r["days_to_earnings"] <= 21],
@@ -801,6 +912,7 @@ def build_email(results, spy_df, qqq_df, regime, sector_extremes, reddit_plays, 
 
       {html_sector_extremes(sector_extremes)}
       {html_reddit_plays(reddit_plays)}
+      {html_bear_cases(bear_cases or [])}
       {html_universe_summary(universe_summary)}
       {html_top10_table(top_10)}
       {html_table("Top 5 Under $30", under_30)}
@@ -838,13 +950,31 @@ def build_email(results, spy_df, qqq_df, regime, sector_extremes, reddit_plays, 
     else:
         text += "No strong Reddit-related stock plays today.\n"
 
-    text += "\nTop 10 Stocks\n"
+    text += "\nStrong Bear Cases\n"
+    if bear_cases:
+        for bear in bear_cases:
+            text += (
+                f"{bear['ticker']} | Bear {float(bear.get('bear_score', 0)):.0f} | {bear.get('setup_type', '')}\n"
+                f"Reason: {bear.get('reason', '')}\n"
+            )
+    else:
+        text += "No strong bearish swing cases today.\n"
+
+    text += "\nRecommendations\n"
+    if not top_10:
+        text += "No high-confidence recommendations today.\n"
     for r in top_10:
         text += (
-            f"{r['ticker']} | Score {r.get('score', 0):.0f} | Opportunity {r.get('opportunity_score', 0):.0f} | "
+            f"{r['ticker']} | Score {r.get('score', 0):.0f} | Confidence {r.get('recommendation_confidence', 0):.0f} | "
+            f"Opportunity {r.get('opportunity_score', 0):.0f} | "
             f"Pre {r.get('pre_market_activity', 0):.0f} | Post {r.get('post_market_activity', 0):.0f} | "
+            f"Swing {r.get('swing_setup', 0):.0f} | "
             f"Catalyst {r.get('catalyst_score', 0):.0f} | Quality {r.get('quality_score', 0):.0f}\n"
             f"Drivers: {', '.join(r.get('top_drivers', top_drivers(r))[:3])}\n"
+            f"Swing plan: {r.get('swing_details', {}).get('setup_type', 'n/a')} | "
+            f"Stop ${float(r.get('swing_details', {}).get('stop_loss', 0)):.2f} | "
+            f"Target ${float(r.get('swing_details', {}).get('target_price', 0)):.2f} | "
+            f"R/R {float(r.get('swing_details', {}).get('risk_reward', 0)):.2f}\n"
             f"Risks: {', '.join(r.get('top_risks', top_risks(r))[:2])}\n"
             f"Freshness: {str(r.get('data_freshness', ''))[:19]} | Missing data: {r.get('missing_data_warning') or 'none'}\n"
         )
@@ -860,7 +990,8 @@ def build_email(results, spy_df, qqq_df, regime, sector_extremes, reddit_plays, 
         for r in rows:
             text += (
                 f"{r['ticker']} | Opening {r.get('opening_activity', 0):.0f} | "
-                f"Pre {r.get('pre_market_activity', 0):.0f} | Post {r.get('post_market_activity', 0):.0f}\n"
+                f"Pre {r.get('pre_market_activity', 0):.0f} | Post {r.get('post_market_activity', 0):.0f} | "
+                f"Swing {r.get('swing_setup', 0):.0f}\n"
                 f"Reason: {upside_reason(r, mode)}\n"
             )
 
@@ -870,8 +1001,8 @@ def build_email(results, spy_df, qqq_df, regime, sector_extremes, reddit_plays, 
 def main():
     learned_weights = refresh_learning_state()
     log_event("learned_weights", weights=learned_weights)
-    results, spy_df, qqq_df, regime, sector_extremes, reddit_plays, universe_summary = analyze_universe(learned_weights)
-    html, text, top_10 = build_email(results, spy_df, qqq_df, regime, sector_extremes, reddit_plays, universe_summary)
+    results, spy_df, qqq_df, regime, sector_extremes, reddit_plays, universe_summary, bear_cases = analyze_universe(learned_weights)
+    html, text, top_10 = build_email(results, spy_df, qqq_df, regime, sector_extremes, reddit_plays, universe_summary, bear_cases)
 
     print(text)
     log_predictions(top_10)

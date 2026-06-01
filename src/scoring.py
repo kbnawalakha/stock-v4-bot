@@ -38,6 +38,7 @@ def opportunity_score(row: dict, weights: dict[str, float] | None = None) -> flo
         (row.get("post_market_activity", 50.0), weights.get("post_market_activity", 0.03)),
         (row.get("volume_accumulation", 50.0), weights.get("volume_accumulation", 0.08)),
         (row.get("volatility_setup", 50.0), weights.get("volatility_setup", 0.06)),
+        (row.get("swing_setup", 50.0), weights.get("swing_setup", 0.10)),
         (row.get("options_flow", 50.0), weights.get("options_flow", 0.08)),
         (row.get("etf_flow_exposure", 50.0), 0.02),
     ])
@@ -63,6 +64,7 @@ def quality_score(row: dict, weights: dict[str, float] | None = None) -> float:
         (row.get("fundamental_momentum", 50.0), weights.get("fundamental_momentum", 0.10)),
         (row.get("institutional_ownership", 50.0), weights.get("institutional_ownership", 0.05)),
         (row.get("pattern_trading", 50.0), weights.get("pattern_trading", 0.05)),
+        (row.get("swing_risk_reward", 50.0), 0.04),
         (row.get("liquidity_score", 50.0), 0.05),
     ])
 

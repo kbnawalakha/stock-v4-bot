@@ -13,11 +13,12 @@ sys.path.insert(0, str(ROOT / "src"))
 from analyst_revisions import analyst_revision_score
 from insider_buying import insider_buying_score
 from fmp_client import FMPClient
-from main_v4 import quality_liquidity_filter
+from main_v4 import quality_liquidity_filter, recommendation_confidence
 from market_breadth import market_breadth_regime
 from opening_activity import _session_activity_score
 from scoring import apply_reddit_blend, regime_adjusted_weights
 from reddit_client import _fetch_subreddit_listing
+from swing_trading import bear_case_score, swing_trading_score
 from universe_builder import build_daily_universe, normalize_ticker, _valid_common_stock_symbol
 from volatility_setup import volatility_setup_score
 from volume_accumulation import volume_accumulation_score
@@ -198,6 +199,43 @@ class V42SignalTests(unittest.TestCase):
         self.assertEqual(result["pre_market_data_available"], 1.0)
         self.assertGreater(result["pre_market_activity"], 50.0)
         self.assertGreater(result["pre_market_raw_return_pct"], 0.0)
+
+    def test_swing_trading_score_returns_trade_plan(self):
+        df = self._price_frame(start=20, trend=0.18)
+        result = swing_trading_score(df)
+        self.assertGreaterEqual(result["score"], 0.0)
+        self.assertLessEqual(result["score"], 100.0)
+        self.assertGreater(result["entry_price"], 0.0)
+        self.assertGreater(result["target_price"], result["entry_price"])
+        self.assertLess(result["stop_loss"], result["entry_price"])
+        self.assertIn("reason", result)
+
+    def test_bear_case_score_detects_breakdown(self):
+        df = self._price_frame(start=80, trend=-0.25)
+        result = bear_case_score(df)
+        self.assertGreaterEqual(result["score"], 65.0)
+        self.assertIn("reason", result)
+
+    def test_recommendation_confidence_filters_weak_rows(self):
+        weak = {
+            "score": 35,
+            "swing_setup": 35,
+            "quality_score": 40,
+            "risk_quality": 35,
+            "catalyst_score": 35,
+            "swing_details": {"risk_reward": 0.8},
+        }
+        strong = {
+            "score": 78,
+            "swing_setup": 82,
+            "quality_score": 75,
+            "risk_quality": 75,
+            "catalyst_score": 70,
+            "sentiment_confidence": 0.8,
+            "swing_details": {"risk_reward": 2.2},
+        }
+        self.assertLess(recommendation_confidence(weak), 55)
+        self.assertGreaterEqual(recommendation_confidence(strong), 55)
 
     def _price_frame(self, start=20.0, trend=0.2):
         dates = pd.date_range("2025-01-01", periods=220, freq="B")

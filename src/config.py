@@ -8,6 +8,8 @@ UNIVERSE = [
 ]
 
 TOP_N = 10
+MAX_RECOMMENDATIONS = 15
+BEAR_CASE_N = 5
 UNDER_30_N = 5
 EARNINGS_N = 5
 CATALYST_N = 5
@@ -31,6 +33,7 @@ STRATEGY_WEIGHTS = {
     "short_squeeze": 0.04,
     "institutional_ownership": 0.05,
     "pattern_trading": 0.05,
+    "swing_setup": 0.10,
     "political_geo": 0.01,
     "politician_trade": 0.01,
 }

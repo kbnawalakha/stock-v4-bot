@@ -2,8 +2,10 @@ name: V4 Stock Bot
 
 on:
   schedule:
-    - cron: "5 14 * * 1-5"
+    - cron: "15 14 * * 1-5"
+    - cron: "15 15 * * 1-5"
     - cron: "0 5 * * 1"
+    - cron: "0 6 * * 1"
   workflow_dispatch:
 
 jobs:
@@ -23,9 +25,30 @@ jobs:
 
       - run: pip install -r requirements.txt
 
+      - name: Schedule guard
+        id: schedule_guard
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "run_bot=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          hour=$(TZ=America/Los_Angeles date +%H)
+          minute=$(TZ=America/Los_Angeles date +%M)
+          day=$(TZ=America/Los_Angeles date +%u)
+          if { [ "$day" -ge 1 ] && [ "$day" -le 5 ] && [ "$hour" = "07" ] && [ "$minute" = "15" ]; } || \
+             { [ "$day" = "7" ] && [ "$hour" = "22" ] && [ "$minute" = "00" ]; }; then
+            echo "run_bot=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_bot=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping run outside configured Pacific Time schedule. Local time: day=${day} ${hour}:${minute}"
+          fi
+
       - run: python -m unittest discover -s tests
+        if: steps.schedule_guard.outputs.run_bot == 'true'
 
       - run: python src/main_v4.py
+        if: steps.schedule_guard.outputs.run_bot == 'true'
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
@@ -47,6 +70,8 @@ jobs:
           HIGH_MOMENTUM_SCAN_LIMIT: ${{ secrets.HIGH_MOMENTUM_SCAN_LIMIT }}
           MIN_PRICE: ${{ secrets.MIN_PRICE }}
           MIN_MARKET_CAP: ${{ secrets.MIN_MARKET_CAP }}
+          MIN_RECOMMENDATION_CONFIDENCE: ${{ secrets.MIN_RECOMMENDATION_CONFIDENCE }}
+          MAX_RECOMMENDATIONS: ${{ secrets.MAX_RECOMMENDATIONS }}
           INCLUDE_MICROCAPS: ${{ secrets.INCLUDE_MICROCAPS }}
           INCLUDE_REDDIT_IN_UNIVERSE: ${{ secrets.INCLUDE_REDDIT_IN_UNIVERSE }}
           INCLUDE_ETF_HOLDINGS: ${{ secrets.INCLUDE_ETF_HOLDINGS }}
@@ -60,6 +85,7 @@ jobs:
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
 
       - name: Persist learning state
+        if: steps.schedule_guard.outputs.run_bot == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

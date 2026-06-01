@@ -17,6 +17,8 @@ def why_buy(row: dict, is_earnings: bool = False, is_catalyst: bool = False) -> 
         reasons.append("bullish pre-market activity")
     if row.get("post_market_activity", 0) >= 70:
         reasons.append("bullish post-market activity")
+    if row.get("swing_setup", 0) >= 70:
+        reasons.append(row.get("swing_details", {}).get("setup_type", "constructive swing setup"))
     if row.get("options_flow", 0) >= 70:
         reasons.append("bullish options activity")
     if row.get("earnings", 0) >= 70:

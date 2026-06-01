@@ -1,7 +1,7 @@
 # Stock V4.2 Bot - Multi-Signal Catalyst Edition
 
 Daily stock signal bot with regime-aware ranking, overnight Gemini sentiment,
-pre-market activity, post-market activity, opening activity, options flow, earnings, catalyst, institutional ownership,
+pre-market activity, post-market activity, opening activity, swing setup quality, options flow, earnings, catalyst, institutional ownership,
 institutional ownership change, analyst revisions, fundamentals momentum,
 volume accumulation, insider buying, short squeeze potential, volatility setup,
 ETF flow exposure proxy, daily/weekly trading patterns, Reddit watchlists, and political/geopolitical signals.
@@ -10,15 +10,16 @@ SPY, and updates `learning_state.json` so signal weights can adapt over time.
 
 Email sections:
 - Universe Summary
-- Top 10 Stocks
+- Recommendations
+- Strong Bear Cases
 - Top 5 Under $30
 - Top 5 Earnings Setups
 - Reddit Related Stocks
 - Catalyst Watch
 - Political / Geopolitical Watch
 
-GitHub Actions sends reports on weekday mornings at 7:05 AM Pacific during
-daylight time and on Sunday at 10:00 PM Pacific during daylight time.
+GitHub Actions sends reports on weekday mornings at 7:15 AM Pacific and on
+Sunday at 10:00 PM Pacific, using a Pacific-time guard for daylight-saving shifts.
 
 Required GitHub Secrets:
 - GEMINI_API_KEY
@@ -45,6 +46,8 @@ Optional:
 - TARGET_STAGE2_SIZE defaults to 100
 - TARGET_DEEP_ANALYSIS_SIZE defaults to 20
 - HIGH_MOMENTUM_SCAN_LIMIT defaults to 300
+- MIN_RECOMMENDATION_CONFIDENCE defaults to 55
+- MAX_RECOMMENDATIONS defaults to 15
 - MIN_STOCK_PRICE defaults to 10
 - MIN_PRICE defaults to 10 for the dynamic universe quality filter
 - MIN_AVG_DAILY_VOLUME defaults to 500000
@@ -64,10 +67,13 @@ Optional:
 The ranking funnel is:
 1. Dynamic universe from manual seed, indexes, ETF holdings, Reddit, earnings, and momentum sources
 2. Quality/liquidity filter
-3. Stage 2 opportunity score from technical, pre-market, post-market, opening, volume, volatility, ETF flow, and pattern signals
+3. Stage 2 opportunity score from technical, swing setup quality, pre-market, post-market, opening, volume, volatility, ETF flow, and pattern signals
 4. Stage 3 medium-depth score from options, earnings, analyst, insider, institutional, squeeze, and political signals
 5. Stage 4 deep analysis using Finnhub overnight news and Gemini sentiment on the final deep-analysis candidates
-6. Market-regime weight adjustment and final top 10 ranking
+6. Market-regime weight adjustment, confidence filtering, and dynamic recommendation count
+
+Swing setup scoring includes pullback buys, moving-average crossover confirmation, support/resistance bounces,
+volume-confirmed breakouts, Fibonacci retracement zones, anchored-VWAP-style pullbacks, and earnings-momentum style continuation.
 
 The politician-trade module has safe fallback behavior. If no API is configured, it checks the free Capitol Trades public site and keyword-based geopolitical catalysts.
 Not financial advice. For research only. Verify data before trading.
