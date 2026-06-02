@@ -10,6 +10,7 @@ from config import (
     TOP_N,
     MAX_RECOMMENDATIONS,
     BEAR_CASE_N,
+    SWING_RECOMMENDATION_N,
     UNDER_30_N,
     EARNINGS_N,
     CATALYST_N,
@@ -659,14 +660,12 @@ def html_table(title, rows, reason_mode="normal"):
       <tr style="background:#f2f2f2;">
         <th align="left" style="border:1px solid #ddd;">Ticker</th>
         <th align="right" style="border:1px solid #ddd;">Opening</th>
-        <th align="right" style="border:1px solid #ddd;">Pre</th>
-        <th align="right" style="border:1px solid #ddd;">Post</th>
         <th align="right" style="border:1px solid #ddd;">Swing</th>
         <th align="left" style="border:1px solid #ddd;">Reason</th>
       </tr>
     """
     if not rows:
-        html += '<tr><td colspan="6" style="border:1px solid #ddd;">No matching setups today.</td></tr>'
+        html += '<tr><td colspan="4" style="border:1px solid #ddd;">No matching setups today.</td></tr>'
 
     for r in rows:
         ticker_cell = f"<b>{r['ticker']}</b><br><span style='color:#666;'>${r['price']:.2f}</span>"
@@ -676,8 +675,6 @@ def html_table(title, rows, reason_mode="normal"):
         <tr>
           <td style="border:1px solid #ddd;vertical-align:top;width:18%;">{ticker_cell}</td>
           <td align="right" style="border:1px solid #ddd;vertical-align:top;width:12%;">{r.get('opening_activity', 0):.0f}</td>
-          <td align="right" style="border:1px solid #ddd;vertical-align:top;width:10%;">{r.get('pre_market_activity', 0):.0f}</td>
-          <td align="right" style="border:1px solid #ddd;vertical-align:top;width:10%;">{r.get('post_market_activity', 0):.0f}</td>
           <td align="right" style="border:1px solid #ddd;vertical-align:top;width:10%;">{r.get('swing_setup', 0):.0f}</td>
           <td style="border:1px solid #ddd;vertical-align:top;">{reason}</td>
         </tr>
@@ -694,9 +691,6 @@ def html_top10_table(rows):
         <th align="left" style="border:1px solid #ddd;">Ticker</th>
         <th align="right" style="border:1px solid #ddd;">Score</th>
         <th align="right" style="border:1px solid #ddd;">Conf</th>
-        <th align="right" style="border:1px solid #ddd;">Opportunity</th>
-        <th align="right" style="border:1px solid #ddd;">Pre</th>
-        <th align="right" style="border:1px solid #ddd;">Post</th>
         <th align="right" style="border:1px solid #ddd;">Swing</th>
         <th align="right" style="border:1px solid #ddd;">Catalyst</th>
         <th align="right" style="border:1px solid #ddd;">Quality</th>
@@ -704,7 +698,7 @@ def html_top10_table(rows):
       </tr>
     """
     if not rows:
-        html += '<tr><td colspan="10" style="border:1px solid #ddd;">No high-confidence recommendations today.</td></tr>'
+        html += '<tr><td colspan="7" style="border:1px solid #ddd;">No high-confidence recommendations today.</td></tr>'
 
     for row in rows:
         drivers = "<br>".join(escape(item) for item in row.get("top_drivers", top_drivers(row))[:3])
@@ -716,9 +710,6 @@ def html_top10_table(rows):
           <td style="border:1px solid #ddd;vertical-align:top;"><b>{escape(row["ticker"])}</b><br><span style="color:#666;">${row["price"]:.2f}</span></td>
           <td align="right" style="border:1px solid #ddd;vertical-align:top;">{row.get("score", 0):.0f}</td>
           <td align="right" style="border:1px solid #ddd;vertical-align:top;">{row.get("recommendation_confidence", 0):.0f}</td>
-          <td align="right" style="border:1px solid #ddd;vertical-align:top;">{row.get("opportunity_score", 0):.0f}</td>
-          <td align="right" style="border:1px solid #ddd;vertical-align:top;">{row.get("pre_market_activity", 0):.0f}</td>
-          <td align="right" style="border:1px solid #ddd;vertical-align:top;">{row.get("post_market_activity", 0):.0f}</td>
           <td align="right" style="border:1px solid #ddd;vertical-align:top;">{row.get("swing_setup", 0):.0f}</td>
           <td align="right" style="border:1px solid #ddd;vertical-align:top;">{row.get("catalyst_score", 0):.0f}</td>
           <td align="right" style="border:1px solid #ddd;vertical-align:top;">{row.get("quality_score", 0):.0f}</td>
@@ -726,9 +717,53 @@ def html_top10_table(rows):
             <b>Drivers</b><br>{drivers}<br>
             <b>Risks</b><br>{risks}<br>
             <span style="color:#666;">Freshness: {freshness}</span><br>
-            <span style="color:#666;">Swing: {escape(str(row.get("swing_details", {}).get("setup_type", "n/a")))} | Stop: ${float(row.get("swing_details", {}).get("stop_loss", 0)):.2f} | Target: ${float(row.get("swing_details", {}).get("target_price", 0)):.2f}</span><br>
             <span style="color:#999;">Missing data: {warning}</span>
           </td>
+        </tr>
+        """
+    html += "</table>"
+    return html
+
+
+def swing_recommendation_score(row: dict) -> float:
+    return float(row.get("swing_setup", 0)) * 0.65 + float(row.get("pattern_trading", 0)) * 0.35
+
+
+def swing_recommendations(rows: list[dict]) -> list[dict]:
+    candidates = [
+        row for row in rows
+        if row.get("swing_setup", 0) >= 65 and row.get("pattern_trading", 0) >= 65
+    ]
+    return sorted(candidates, key=swing_recommendation_score, reverse=True)[:SWING_RECOMMENDATION_N]
+
+
+def html_swing_recommendations(rows):
+    html = """
+    <h2 style="margin-top:28px;border-bottom:2px solid #222;padding-bottom:6px;">Swing Recommendations</h2>
+    <table width="100%" cellpadding="8" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px;">
+      <tr style="background:#f2f2f2;">
+        <th align="left" style="border:1px solid #ddd;">Ticker</th>
+        <th align="right" style="border:1px solid #ddd;">Swing</th>
+        <th align="right" style="border:1px solid #ddd;">Pattern</th>
+        <th align="right" style="border:1px solid #ddd;">Entry</th>
+        <th align="right" style="border:1px solid #ddd;">Stop</th>
+        <th align="right" style="border:1px solid #ddd;">Target</th>
+        <th align="left" style="border:1px solid #ddd;">Setup</th>
+      </tr>
+    """
+    if not rows:
+        html += '<tr><td colspan="7" style="border:1px solid #ddd;">No strong swing recommendations today.</td></tr>'
+    for row in rows:
+        details = row.get("swing_details", {})
+        html += f"""
+        <tr>
+          <td style="border:1px solid #ddd;vertical-align:top;"><b>{escape(row["ticker"])}</b><br><span style="color:#666;">${float(row.get("price", 0)):.2f}</span></td>
+          <td align="right" style="border:1px solid #ddd;vertical-align:top;">{float(row.get("swing_setup", 0)):.0f}</td>
+          <td align="right" style="border:1px solid #ddd;vertical-align:top;">{float(row.get("pattern_trading", 0)):.0f}</td>
+          <td align="right" style="border:1px solid #ddd;vertical-align:top;">${float(details.get("entry_price", row.get("price", 0))):.2f}</td>
+          <td align="right" style="border:1px solid #ddd;vertical-align:top;">${float(details.get("stop_loss", 0)):.2f}</td>
+          <td align="right" style="border:1px solid #ddd;vertical-align:top;">${float(details.get("target_price", 0)):.2f}</td>
+          <td style="border:1px solid #ddd;vertical-align:top;">{escape(str(details.get("setup_type", "")))}<br><span style="color:#666;">R/R {float(details.get("risk_reward", 0)):.2f}</span></td>
         </tr>
         """
     html += "</table>"
@@ -891,6 +926,7 @@ def build_email(results, spy_df, qqq_df, regime, sector_extremes, reddit_plays, 
         key=lambda x: x["catalyst_watch_score"],
         reverse=True,
     )[:CATALYST_N]
+    swing_watch = swing_recommendations(results)
 
     political_watch = sorted(
         [r for r in results if r.get("political_geo", 0) >= 20 or r.get("politician_trade", 0) >= 10],
@@ -918,6 +954,7 @@ def build_email(results, spy_df, qqq_df, regime, sector_extremes, reddit_plays, 
       {html_table("Top 5 Under $30", under_30)}
       {html_table("Top 5 Earnings Setups", earnings, reason_mode="earnings")}
       {html_table("Catalyst Watch", catalyst_watch, reason_mode="catalyst")}
+      {html_swing_recommendations(swing_watch)}
       {html_table("Political / Geopolitical Watch", political_watch, reason_mode="political")}
 
       <p style="color:#777;font-size:12px;margin-top:28px;">
@@ -966,15 +1003,9 @@ def build_email(results, spy_df, qqq_df, regime, sector_extremes, reddit_plays, 
     for r in top_10:
         text += (
             f"{r['ticker']} | Score {r.get('score', 0):.0f} | Confidence {r.get('recommendation_confidence', 0):.0f} | "
-            f"Opportunity {r.get('opportunity_score', 0):.0f} | "
-            f"Pre {r.get('pre_market_activity', 0):.0f} | Post {r.get('post_market_activity', 0):.0f} | "
             f"Swing {r.get('swing_setup', 0):.0f} | "
             f"Catalyst {r.get('catalyst_score', 0):.0f} | Quality {r.get('quality_score', 0):.0f}\n"
             f"Drivers: {', '.join(r.get('top_drivers', top_drivers(r))[:3])}\n"
-            f"Swing plan: {r.get('swing_details', {}).get('setup_type', 'n/a')} | "
-            f"Stop ${float(r.get('swing_details', {}).get('stop_loss', 0)):.2f} | "
-            f"Target ${float(r.get('swing_details', {}).get('target_price', 0)):.2f} | "
-            f"R/R {float(r.get('swing_details', {}).get('risk_reward', 0)):.2f}\n"
             f"Risks: {', '.join(r.get('top_risks', top_risks(r))[:2])}\n"
             f"Freshness: {str(r.get('data_freshness', ''))[:19]} | Missing data: {r.get('missing_data_warning') or 'none'}\n"
         )
@@ -990,10 +1021,24 @@ def build_email(results, spy_df, qqq_df, regime, sector_extremes, reddit_plays, 
         for r in rows:
             text += (
                 f"{r['ticker']} | Opening {r.get('opening_activity', 0):.0f} | "
-                f"Pre {r.get('pre_market_activity', 0):.0f} | Post {r.get('post_market_activity', 0):.0f} | "
                 f"Swing {r.get('swing_setup', 0):.0f}\n"
                 f"Reason: {upside_reason(r, mode)}\n"
             )
+
+        if title == "Catalyst Watch":
+            text += "\nSwing Recommendations\n"
+            if not swing_watch:
+                text += "No strong swing recommendations today.\n"
+            for r in swing_watch:
+                details = r.get("swing_details", {})
+                text += (
+                    f"{r['ticker']} | Swing {r.get('swing_setup', 0):.0f} | Pattern {r.get('pattern_trading', 0):.0f}\n"
+                    f"Entry ${float(details.get('entry_price', r.get('price', 0))):.2f} | "
+                    f"Stop ${float(details.get('stop_loss', 0)):.2f} | "
+                    f"Target ${float(details.get('target_price', 0)):.2f} | "
+                    f"R/R {float(details.get('risk_reward', 0)):.2f}\n"
+                    f"Setup: {details.get('setup_type', '')}\n"
+                )
 
     return html, text, top_10
 

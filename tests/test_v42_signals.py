@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from analyst_revisions import analyst_revision_score
 from insider_buying import insider_buying_score
 from fmp_client import FMPClient
-from main_v4 import quality_liquidity_filter, recommendation_confidence
+from main_v4 import quality_liquidity_filter, recommendation_confidence, swing_recommendations
 from market_breadth import market_breadth_regime
 from opening_activity import _session_activity_score
 from scoring import apply_reddit_blend, regime_adjusted_weights
@@ -236,6 +236,22 @@ class V42SignalTests(unittest.TestCase):
         }
         self.assertLess(recommendation_confidence(weak), 55)
         self.assertGreaterEqual(recommendation_confidence(strong), 55)
+
+    def test_swing_recommendations_rank_top_five_by_swing_and_pattern(self):
+        rows = [
+            {
+                "ticker": f"T{i}",
+                "swing_setup": 65 + i,
+                "pattern_trading": 66 + i,
+                "swing_details": {"entry_price": 10, "stop_loss": 9, "target_price": 12},
+            }
+            for i in range(7)
+        ]
+        rows.append({"ticker": "WEAK", "swing_setup": 90, "pattern_trading": 40, "swing_details": {}})
+        selected = swing_recommendations(rows)
+        self.assertEqual(len(selected), 5)
+        self.assertEqual(selected[0]["ticker"], "T6")
+        self.assertNotIn("WEAK", [row["ticker"] for row in selected])
 
     def _price_frame(self, start=20.0, trend=0.2):
         dates = pd.date_range("2025-01-01", periods=220, freq="B")

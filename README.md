@@ -16,6 +16,7 @@ Email sections:
 - Top 5 Earnings Setups
 - Reddit Related Stocks
 - Catalyst Watch
+- Swing Recommendations
 - Political / Geopolitical Watch
 
 GitHub Actions sends reports on weekday mornings at 7:15 AM Pacific and on
