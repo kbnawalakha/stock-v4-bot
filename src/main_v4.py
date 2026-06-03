@@ -11,6 +11,7 @@ from config import (
     MAX_RECOMMENDATIONS,
     BEAR_CASE_N,
     SWING_RECOMMENDATION_N,
+    MIN_SWING_RISK_REWARD,
     UNDER_30_N,
     EARNINGS_N,
     CATALYST_N,
@@ -729,10 +730,18 @@ def swing_recommendation_score(row: dict) -> float:
     return float(row.get("swing_setup", 0)) * 0.65 + float(row.get("pattern_trading", 0)) * 0.35
 
 
+def swing_recommendation_risk_reward(row: dict) -> float:
+    try:
+        return float((row.get("swing_details") or {}).get("risk_reward", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def swing_recommendations(rows: list[dict]) -> list[dict]:
     candidates = [
         row for row in rows
         if row.get("swing_setup", 0) >= 65 and row.get("pattern_trading", 0) >= 65
+        and swing_recommendation_risk_reward(row) >= MIN_SWING_RISK_REWARD
     ]
     return sorted(candidates, key=swing_recommendation_score, reverse=True)[:SWING_RECOMMENDATION_N]
 

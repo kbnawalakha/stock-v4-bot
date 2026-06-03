@@ -244,15 +244,17 @@ class V42SignalTests(unittest.TestCase):
                 "ticker": f"T{i}",
                 "swing_setup": 65 + i,
                 "pattern_trading": 66 + i,
-                "swing_details": {"entry_price": 10, "stop_loss": 9, "target_price": 12},
+                "swing_details": {"entry_price": 10, "stop_loss": 9, "target_price": 12, "risk_reward": 1.2},
             }
             for i in range(7)
         ]
         rows.append({"ticker": "WEAK", "swing_setup": 90, "pattern_trading": 40, "swing_details": {}})
+        rows.append({"ticker": "LOWRR", "swing_setup": 95, "pattern_trading": 95, "swing_details": {"risk_reward": 0.7}})
         selected = swing_recommendations(rows)
         self.assertEqual(len(selected), 5)
         self.assertEqual(selected[0]["ticker"], "T6")
         self.assertNotIn("WEAK", [row["ticker"] for row in selected])
+        self.assertNotIn("LOWRR", [row["ticker"] for row in selected])
 
     def test_learning_evaluates_prior_recommendations_and_writes_outcomes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
