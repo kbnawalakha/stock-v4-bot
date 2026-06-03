@@ -10,6 +10,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+import learning
 from analyst_revisions import analyst_revision_score
 from insider_buying import insider_buying_score
 from fmp_client import FMPClient
@@ -252,6 +253,67 @@ class V42SignalTests(unittest.TestCase):
         self.assertEqual(len(selected), 5)
         self.assertEqual(selected[0]["ticker"], "T6")
         self.assertNotIn("WEAK", [row["ticker"] for row in selected])
+
+    def test_learning_evaluates_prior_recommendations_and_writes_outcomes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old_predictions = learning.PREDICTIONS_FILE
+            old_state = learning.STATE_FILE
+            old_outcomes = learning.OUTCOMES_FILE
+            learning.PREDICTIONS_FILE = Path(tmpdir) / "predictions.csv"
+            learning.STATE_FILE = Path(tmpdir) / "learning_state.json"
+            learning.OUTCOMES_FILE = Path(tmpdir) / "recommendation_outcomes.csv"
+            try:
+                learning.PREDICTIONS_FILE.write_text(
+                    "recommendation_id,date,ticker,price,trend,options_flow,opening_activity,score,recommendation_confidence,regime\n"
+                    "2025-01-01:TEST:1,2025-01-01,TEST,100,90,80,75,80,70,RISK_ON\n",
+                    encoding="utf-8",
+                )
+
+                def fake_history(ticker, period="2mo"):
+                    dates = pd.date_range("2025-01-01", periods=3, freq="B")
+                    closes = [100.0, 101.0, 102.0] if ticker == "SPY" else [100.0, 110.0, 115.0]
+                    close = pd.Series(closes, index=dates)
+                    return pd.DataFrame({
+                        "Open": close,
+                        "High": close * 1.01,
+                        "Low": close * 0.99,
+                        "Close": close,
+                        "Volume": [1_000_000, 1_100_000, 1_200_000],
+                    })
+
+                with patch("learning.get_history", side_effect=fake_history):
+                    weights = learning.refresh_learning_state()
+
+                state = learning.load_learning_state()
+                outcomes = pd.read_csv(learning.OUTCOMES_FILE)
+                self.assertEqual(state["last_evaluation_summary"]["evaluated_new"], 1)
+                self.assertEqual(len(outcomes), 1)
+                self.assertGreater(outcomes["alpha_return_pct"].iloc[0], 0)
+                self.assertIn("trend", weights)
+            finally:
+                learning.PREDICTIONS_FILE = old_predictions
+                learning.STATE_FILE = old_state
+                learning.OUTCOMES_FILE = old_outcomes
+
+    def test_historical_downside_alerts_find_prior_recommendation_breakdown(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old_predictions = learning.PREDICTIONS_FILE
+            learning.PREDICTIONS_FILE = Path(tmpdir) / "predictions.csv"
+            try:
+                learning.PREDICTIONS_FILE.write_text(
+                    "recommendation_id,date,ticker,price,score,recommendation_confidence\n"
+                    "2025-01-01:TEST:1,2025-01-01,TEST,100,80,70\n",
+                    encoding="utf-8",
+                )
+                with patch("learning.get_history", return_value=self._price_frame(start=80, trend=-0.25)):
+                    alerts = learning.historical_downside_alerts(limit=3, lookback_days=1000, min_bear_score=65)
+
+                self.assertEqual(len(alerts), 1)
+                self.assertEqual(alerts[0]["ticker"], "TEST")
+                self.assertLess(alerts[0]["return_pct"], 0)
+                self.assertGreaterEqual(alerts[0]["bear_score"], 65)
+            finally:
+                learning.PREDICTIONS_FILE = old_predictions
 
     def _price_frame(self, start=20.0, trend=0.2):
         dates = pd.date_range("2025-01-01", periods=220, freq="B")

@@ -7,23 +7,35 @@ import pandas as pd
 
 from config import STRATEGY_WEIGHTS
 from market_data import get_history
+from swing_trading import bear_case_score
 
 logger = logging.getLogger(__name__)
 
 PREDICTIONS_FILE = Path("predictions.csv")
 STATE_FILE = Path("learning_state.json")
+OUTCOMES_FILE = Path("recommendation_outcomes.csv")
 MIN_EVALUATION_DAYS = 1
 SIGNAL_DECAY = 0.90
 LEARNING_RATE = 0.35
 MIN_WEIGHT_MULTIPLIER = 0.50
 MAX_WEIGHT_MULTIPLIER = 1.50
+MAX_EVALUATED_KEYS = 5000
+MAX_EVALUATION_HISTORY = 1000
+MAX_OUTCOME_ROWS = 5000
+DOWNSIDE_ALERT_LOOKBACK_DAYS = 30
+DOWNSIDE_ALERT_MAX_SCAN = 80
+DOWNSIDE_ALERT_MIN_BEAR_SCORE = 70.0
+DOWNSIDE_ALERT_MIN_LOSS_PCT = -2.0
 
 
 def _empty_state() -> dict:
     return {
-        "version": 1,
+        "version": 2,
         "last_updated": None,
         "evaluated": [],
+        "evaluated_recommendations": [],
+        "evaluation_history": [],
+        "last_evaluation_summary": {},
         "signal_scores": {key: 0.0 for key in STRATEGY_WEIGHTS},
         "learned_weights": dict(STRATEGY_WEIGHTS),
     }
@@ -46,7 +58,11 @@ def load_learning_state() -> dict:
         **STRATEGY_WEIGHTS,
         **base.get("learned_weights", {}),
     })
-    base["evaluated"] = list(base.get("evaluated", []))
+    evaluated = list(base.get("evaluated_recommendations") or base.get("evaluated", []))
+    base["evaluated"] = evaluated
+    base["evaluated_recommendations"] = evaluated
+    base["evaluation_history"] = list(base.get("evaluation_history", []))
+    base["last_evaluation_summary"] = dict(base.get("last_evaluation_summary", {}))
     return base
 
 
@@ -60,28 +76,28 @@ def refresh_learning_state() -> dict[str, float]:
         _save_state(state)
         return state["learned_weights"]
 
-    try:
-        predictions = pd.read_csv(PREDICTIONS_FILE)
-    except Exception as exc:
-        logger.warning("predictions_load_failed", extra={"error": str(exc)})
-        return state["learned_weights"]
-
-    required = {"date", "ticker", "price"}
-    if predictions.empty or not required.issubset(predictions.columns):
+    predictions = _load_predictions()
+    if predictions.empty:
         _save_state(state)
         return state["learned_weights"]
 
-    evaluated = set(state.get("evaluated", []))
+    required = {"date", "ticker", "price"}
+    if not required.issubset(predictions.columns):
+        _save_state(state)
+        return state["learned_weights"]
+
+    evaluated = set(state.get("evaluated_recommendations") or state.get("evaluated", []))
     today = datetime.now(timezone.utc).date()
     spy_df = get_history("SPY", period="2mo")
     updated = 0
+    outcome_records = []
 
     for idx, row in predictions.iterrows():
         rec_date = _parse_date(row.get("date"))
         ticker = str(row.get("ticker", "")).upper()
         if rec_date is None or not ticker:
             continue
-        key = f"{rec_date.isoformat()}:{ticker}:{idx}"
+        key = _recommendation_key(row, idx, rec_date, ticker)
         if key in evaluated or (today - rec_date).days < MIN_EVALUATION_DAYS:
             continue
 
@@ -89,7 +105,7 @@ def refresh_learning_state() -> dict[str, float]:
         if not entry_price or entry_price <= 0:
             continue
 
-        ticker_return = _return_since(ticker, entry_price)
+        ticker_return, latest_price = _return_since(ticker, entry_price)
         spy_return = _benchmark_return_since(spy_df, rec_date)
         if ticker_return is None or spy_return is None:
             continue
@@ -97,23 +113,104 @@ def refresh_learning_state() -> dict[str, float]:
         alpha = ticker_return - spy_return
         reward = max(-1.0, min(1.0, alpha / 10.0))
         _update_signal_scores(state, row, reward)
+        outcome_records.append(_outcome_record(key, row, rec_date, ticker, entry_price, latest_price, ticker_return, spy_return, alpha, reward))
         evaluated.add(key)
         updated += 1
 
-    state["evaluated"] = sorted(evaluated)[-1000:]
+    state["evaluated"] = sorted(evaluated)[-MAX_EVALUATED_KEYS:]
+    state["evaluated_recommendations"] = state["evaluated"]
+    state["evaluation_history"] = (state.get("evaluation_history", []) + outcome_records)[-MAX_EVALUATION_HISTORY:]
+    state["last_evaluation_summary"] = _evaluation_summary(outcome_records)
     state["learned_weights"] = _weights_from_signal_scores(state["signal_scores"])
     state["last_updated"] = datetime.now(timezone.utc).isoformat()
     _save_state(state)
-    logger.info(
+    _append_outcome_records(outcome_records)
+    _log_event(
         "learning_state_refreshed",
-        extra={"evaluated_new": updated, "learned_weights": state["learned_weights"]},
+        evaluated_new=updated,
+        summary=state["last_evaluation_summary"],
+        learned_weights=state["learned_weights"],
     )
     return state["learned_weights"]
+
+
+def historical_downside_alerts(
+    limit: int = 5,
+    lookback_days: int = DOWNSIDE_ALERT_LOOKBACK_DAYS,
+    min_bear_score: float = DOWNSIDE_ALERT_MIN_BEAR_SCORE,
+) -> list[dict]:
+    predictions = _load_predictions()
+    required = {"date", "ticker", "price"}
+    if predictions.empty or not required.issubset(predictions.columns):
+        return []
+
+    today = datetime.now(timezone.utc).date()
+    candidates = []
+    for idx, row in predictions.iterrows():
+        rec_date = _parse_date(row.get("date"))
+        if rec_date is None:
+            continue
+        age_days = (today - rec_date).days
+        if age_days < MIN_EVALUATION_DAYS or age_days > lookback_days:
+            continue
+        ticker = str(row.get("ticker", "")).upper()
+        entry_price = _safe_float(row.get("price"))
+        if ticker and entry_price and entry_price > 0:
+            candidates.append((rec_date, idx, row, age_days, ticker, entry_price))
+
+    alerts = []
+    seen = set()
+    scanned = 0
+    for rec_date, idx, row, age_days, ticker, entry_price in sorted(candidates, key=lambda item: (item[0], item[1]), reverse=True):
+        if ticker in seen:
+            continue
+        seen.add(ticker)
+        if scanned >= DOWNSIDE_ALERT_MAX_SCAN:
+            break
+        scanned += 1
+
+        try:
+            df = get_history(ticker, period="2mo")
+            if df.empty:
+                continue
+            latest_price = _safe_float(df["Close"].iloc[-1])
+            if latest_price is None or latest_price <= 0:
+                continue
+            current_return = (latest_price / entry_price - 1) * 100
+            bear = bear_case_score(df)
+            bear_score = float(bear.get("score", 0.0))
+            if bear_score < min_bear_score and not (
+                bear_score >= min_bear_score - 10.0 and current_return <= DOWNSIDE_ALERT_MIN_LOSS_PCT
+            ):
+                continue
+            alerts.append({
+                "ticker": ticker,
+                "date": rec_date.isoformat(),
+                "age_days": age_days,
+                "entry_price": entry_price,
+                "current_price": latest_price,
+                "return_pct": current_return,
+                "bear_score": bear_score,
+                "setup_type": bear.get("setup_type", ""),
+                "reason": bear.get("reason", ""),
+                "recommendation_score": _safe_float(row.get("score")) or 0.0,
+                "recommendation_confidence": _safe_float(row.get("recommendation_confidence")) or 0.0,
+                "risk_score": bear_score + max(0.0, -current_return) * 1.5,
+            })
+        except Exception as exc:
+            _log_event("historical_downside_alert_failed", ticker=ticker, error=str(exc))
+            continue
+
+    alerts = sorted(alerts, key=lambda item: item["risk_score"], reverse=True)[:limit]
+    _log_event("historical_downside_alerts", count=len(alerts), tickers=[item["ticker"] for item in alerts])
+    return alerts
 
 
 def _update_signal_scores(state: dict, row: pd.Series, reward: float) -> None:
     scores = state["signal_scores"]
     for key in STRATEGY_WEIGHTS:
+        if key not in row or pd.isna(row.get(key)):
+            continue
         exposure = _safe_float(row.get(key)) or 0.0
         exposure = max(0.0, min(1.0, exposure / 100.0))
         if exposure <= 0:
@@ -141,14 +238,14 @@ def _normalize_weights(weights: dict[str, float]) -> dict[str, float]:
     return {key: value / total for key, value in cleaned.items()}
 
 
-def _return_since(ticker: str, entry_price: float) -> float | None:
+def _return_since(ticker: str, entry_price: float) -> tuple[float | None, float | None]:
     df = get_history(ticker, period="2mo")
     if df.empty:
-        return None
+        return None, None
     latest = _safe_float(df["Close"].iloc[-1])
     if latest is None or latest <= 0:
-        return None
-    return (latest / entry_price - 1) * 100
+        return None, None
+    return (latest / entry_price - 1) * 100, latest
 
 
 def _benchmark_return_since(spy_df: pd.DataFrame, rec_date) -> float | None:
@@ -183,3 +280,97 @@ def _safe_float(value) -> float | None:
 
 def _save_state(state: dict) -> None:
     STATE_FILE.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _load_predictions() -> pd.DataFrame:
+    if not PREDICTIONS_FILE.exists():
+        return pd.DataFrame()
+    try:
+        return pd.read_csv(PREDICTIONS_FILE)
+    except Exception as exc:
+        _log_event("predictions_load_failed", error=str(exc))
+        return pd.DataFrame()
+
+
+def _recommendation_key(row: pd.Series, idx: int, rec_date, ticker: str) -> str:
+    raw_key = str(row.get("recommendation_id", "")).strip()
+    if raw_key and raw_key.lower() != "nan":
+        return raw_key
+    rank = _safe_float(row.get("rank"))
+    rank_part = int(rank) if rank and rank > 0 else idx
+    return f"{rec_date.isoformat()}:{ticker}:{rank_part}"
+
+
+def _outcome_record(
+    evaluation_id: str,
+    row: pd.Series,
+    rec_date,
+    ticker: str,
+    entry_price: float,
+    latest_price: float | None,
+    ticker_return: float,
+    spy_return: float,
+    alpha: float,
+    reward: float,
+) -> dict:
+    return {
+        "evaluation_id": evaluation_id,
+        "evaluated_at": datetime.now(timezone.utc).isoformat(),
+        "date": rec_date.isoformat(),
+        "ticker": ticker,
+        "entry_price": float(entry_price),
+        "latest_price": float(latest_price or 0.0),
+        "ticker_return_pct": float(ticker_return),
+        "spy_return_pct": float(spy_return),
+        "alpha_return_pct": float(alpha),
+        "learning_reward": float(reward),
+        "score": _safe_float(row.get("score")) or 0.0,
+        "recommendation_confidence": _safe_float(row.get("recommendation_confidence")) or 0.0,
+        "regime": str(row.get("regime", "")),
+    }
+
+
+def _evaluation_summary(records: list[dict]) -> dict:
+    if not records:
+        return {"evaluated_new": 0, "avg_alpha_return_pct": 0.0, "win_rate": 0.0}
+    alphas = [float(record["alpha_return_pct"]) for record in records]
+    wins = [alpha for alpha in alphas if alpha > 0]
+    best = max(records, key=lambda record: float(record["alpha_return_pct"]))
+    worst = min(records, key=lambda record: float(record["alpha_return_pct"]))
+    return {
+        "evaluated_new": len(records),
+        "avg_alpha_return_pct": sum(alphas) / len(alphas),
+        "win_rate": len(wins) / len(records),
+        "best": {"ticker": best["ticker"], "alpha_return_pct": best["alpha_return_pct"]},
+        "worst": {"ticker": worst["ticker"], "alpha_return_pct": worst["alpha_return_pct"]},
+    }
+
+
+def _append_outcome_records(records: list[dict]) -> None:
+    if not records:
+        return
+    new_rows = pd.DataFrame(records)
+    if OUTCOMES_FILE.exists():
+        try:
+            existing = pd.read_csv(OUTCOMES_FILE)
+        except Exception as exc:
+            _log_event("recommendation_outcomes_load_failed", error=str(exc))
+            existing = pd.DataFrame()
+        combined = pd.concat([existing, new_rows], ignore_index=True)
+    else:
+        combined = new_rows
+    if "evaluation_id" in combined.columns:
+        combined = combined.drop_duplicates(subset=["evaluation_id"], keep="last")
+    if len(combined) > MAX_OUTCOME_ROWS:
+        combined = combined.tail(MAX_OUTCOME_ROWS)
+    ordered = [column for column in [
+        "evaluation_id", "evaluated_at", "date", "ticker", "entry_price", "latest_price",
+        "ticker_return_pct", "spy_return_pct", "alpha_return_pct", "learning_reward",
+        "score", "recommendation_confidence", "regime",
+    ] if column in combined.columns]
+    ordered += [column for column in combined.columns if column not in ordered]
+    combined[ordered].to_csv(OUTCOMES_FILE, index=False)
+
+
+def _log_event(event: str, **payload) -> None:
+    logger.info(json.dumps({"event": event, **payload}, default=str))

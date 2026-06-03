@@ -60,7 +60,7 @@ from swing_trading import bear_case_score, swing_trading_score
 from volatility_setup import volatility_setup_score
 from volume_accumulation import volume_accumulation_score
 from universe_builder import build_daily_universe, universe_config, update_universe_stages
-from learning import refresh_learning_state
+from learning import historical_downside_alerts, refresh_learning_state
 from performance import log_predictions
 from emailer import send_email
 
@@ -796,6 +796,39 @@ def html_bear_cases(rows):
     return html
 
 
+def html_historical_downside_alerts(rows):
+    html = """
+    <h2 style="margin-top:28px;border-bottom:2px solid #222;padding-bottom:6px;">Previous Recommendation Risk Alerts</h2>
+    <table width="100%" cellpadding="8" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px;">
+      <tr style="background:#f2f2f2;">
+        <th align="left" style="border:1px solid #ddd;">Ticker</th>
+        <th align="right" style="border:1px solid #ddd;">Return</th>
+        <th align="right" style="border:1px solid #ddd;">Bear</th>
+        <th align="left" style="border:1px solid #ddd;">Signal</th>
+      </tr>
+    """
+    if not rows:
+        html += '<tr><td colspan="4" style="border:1px solid #ddd;">No previous recommendations currently have strong downside signals.</td></tr>'
+    for row in rows:
+        html += f"""
+        <tr>
+          <td style="border:1px solid #ddd;vertical-align:top;">
+            <b>{escape(row["ticker"])}</b><br>
+            <span style="color:#666;">Recommended {escape(str(row.get("date", "")))} ({int(row.get("age_days", 0))}d)</span><br>
+            <span style="color:#666;">Entry ${float(row.get("entry_price", 0)):.2f} | Now ${float(row.get("current_price", 0)):.2f}</span>
+          </td>
+          <td align="right" style="border:1px solid #ddd;vertical-align:top;">{float(row.get("return_pct", 0)):.1f}%</td>
+          <td align="right" style="border:1px solid #ddd;vertical-align:top;">{float(row.get("bear_score", 0)):.0f}</td>
+          <td style="border:1px solid #ddd;vertical-align:top;">
+            {escape(str(row.get("setup_type", "")))}<br>
+            <span style="color:#666;">{escape(str(row.get("reason", "")))}</span>
+          </td>
+        </tr>
+        """
+    html += "</table>"
+    return html
+
+
 def html_sector_extremes(rows):
     html = """
     <h2 style="margin-top:28px;border-bottom:2px solid #222;padding-bottom:6px;">Extreme Sector Signals</h2>
@@ -908,7 +941,17 @@ def universe_summary_text(summary):
     return "\n".join(lines) + "\n"
 
 
-def build_email(results, spy_df, qqq_df, regime, sector_extremes, reddit_plays, universe_summary=None, bear_cases=None):
+def build_email(
+    results,
+    spy_df,
+    qqq_df,
+    regime,
+    sector_extremes,
+    reddit_plays,
+    universe_summary=None,
+    bear_cases=None,
+    historical_bear_alerts=None,
+):
     now_pt = datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%Y-%m-%d %I:%M %p %Z")
     spy_20 = pct_return(spy_df, 20)
     qqq_20 = pct_return(qqq_df, 20)
@@ -949,6 +992,7 @@ def build_email(results, spy_df, qqq_df, regime, sector_extremes, reddit_plays, 
       {html_sector_extremes(sector_extremes)}
       {html_reddit_plays(reddit_plays)}
       {html_bear_cases(bear_cases or [])}
+      {html_historical_downside_alerts(historical_bear_alerts or [])}
       {html_universe_summary(universe_summary)}
       {html_top10_table(top_10)}
       {html_table("Top 5 Under $30", under_30)}
@@ -996,6 +1040,18 @@ def build_email(results, spy_df, qqq_df, regime, sector_extremes, reddit_plays, 
             )
     else:
         text += "No strong bearish swing cases today.\n"
+
+    text += "\nPrevious Recommendation Risk Alerts\n"
+    if historical_bear_alerts:
+        for alert in historical_bear_alerts:
+            text += (
+                f"{alert['ticker']} | Recommended {alert.get('date', '')} | "
+                f"Return {float(alert.get('return_pct', 0)):.1f}% | Bear {float(alert.get('bear_score', 0)):.0f}\n"
+                f"Signal: {alert.get('setup_type', '')}\n"
+                f"Reason: {alert.get('reason', '')}\n"
+            )
+    else:
+        text += "No previous recommendations currently have strong downside signals.\n"
 
     text += "\nRecommendations\n"
     if not top_10:
@@ -1047,7 +1103,18 @@ def main():
     learned_weights = refresh_learning_state()
     log_event("learned_weights", weights=learned_weights)
     results, spy_df, qqq_df, regime, sector_extremes, reddit_plays, universe_summary, bear_cases = analyze_universe(learned_weights)
-    html, text, top_10 = build_email(results, spy_df, qqq_df, regime, sector_extremes, reddit_plays, universe_summary, bear_cases)
+    previous_downside_alerts = historical_downside_alerts()
+    html, text, top_10 = build_email(
+        results,
+        spy_df,
+        qqq_df,
+        regime,
+        sector_extremes,
+        reddit_plays,
+        universe_summary,
+        bear_cases,
+        previous_downside_alerts,
+    )
 
     print(text)
     log_predictions(top_10)
