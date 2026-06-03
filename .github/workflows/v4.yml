@@ -2,8 +2,8 @@ name: V4 Stock Bot
 
 on:
   schedule:
-    - cron: "15 14 * * 1-5"
-    - cron: "15 15 * * 1-5"
+    - cron: "30 13 * * 1-5"
+    - cron: "30 14 * * 1-5"
     - cron: "0 5 * * 1"
     - cron: "0 6 * * 1"
   workflow_dispatch:
@@ -36,7 +36,7 @@ jobs:
           hour=$(TZ=America/Los_Angeles date +%H)
           minute=$(TZ=America/Los_Angeles date +%M)
           day=$(TZ=America/Los_Angeles date +%u)
-          if { [ "$day" -ge 1 ] && [ "$day" -le 5 ] && [ "$hour" = "07" ] && [ "$minute" = "15" ]; } || \
+          if { [ "$day" -ge 1 ] && [ "$day" -le 5 ] && [ "$hour" = "06" ] && [ "$minute" = "30" ]; } || \
              { [ "$day" = "7" ] && [ "$hour" = "22" ] && [ "$minute" = "00" ]; }; then
             echo "run_bot=true" >> "$GITHUB_OUTPUT"
           else
