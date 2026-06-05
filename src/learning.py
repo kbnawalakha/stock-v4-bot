@@ -120,10 +120,29 @@ def refresh_learning_state() -> dict[str, float]:
         if ticker_return is None or spy_return is None:
             continue
 
-        alpha = ticker_return - spy_return
+        direction = _direction(row)
+        position_return, benchmark_return = _directional_returns(direction, ticker_return, spy_return)
+        alpha = position_return - benchmark_return
         reward = max(-1.0, min(1.0, alpha / REWARD_ALPHA_SCALE))
-        _update_signal_scores(state, row, reward)
-        outcome_records.append(_outcome_record(key, row, rec_date, ticker, entry_price, latest_price, ticker_return, spy_return, alpha, reward))
+        if direction == "BULL":
+            _update_signal_scores(state, row, reward)
+        outcome_records.append(
+            _outcome_record(
+                key,
+                row,
+                rec_date,
+                ticker,
+                direction,
+                entry_price,
+                latest_price,
+                ticker_return,
+                spy_return,
+                position_return,
+                benchmark_return,
+                alpha,
+                reward,
+            )
+        )
         evaluated.add(key)
         updated += 1
 
@@ -162,6 +181,8 @@ def historical_downside_alerts(
             continue
         age_days = (today - rec_date).days
         if age_days < MIN_EVALUATION_DAYS or age_days > lookback_days:
+            continue
+        if _direction(row) != "BULL":
             continue
         ticker = str(row.get("ticker", "")).upper()
         entry_price = _safe_float(row.get("price"))
@@ -313,6 +334,17 @@ def _safe_float(value) -> float | None:
         return None
 
 
+def _direction(row: pd.Series) -> str:
+    direction = str(row.get("direction", "BULL") or "BULL").upper()
+    return "SHORT" if direction == "SHORT" else "BULL"
+
+
+def _directional_returns(direction: str, ticker_return: float, spy_return: float) -> tuple[float, float]:
+    if direction == "SHORT":
+        return -ticker_return, -spy_return
+    return ticker_return, spy_return
+
+
 def _save_state(state: dict) -> None:
     STATE_FILE.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -341,10 +373,13 @@ def _outcome_record(
     row: pd.Series,
     rec_date,
     ticker: str,
+    direction: str,
     entry_price: float,
     latest_price: float | None,
     ticker_return: float,
     spy_return: float,
+    position_return: float,
+    benchmark_return: float,
     alpha: float,
     reward: float,
 ) -> dict:
@@ -353,10 +388,13 @@ def _outcome_record(
         "evaluated_at": datetime.now(timezone.utc).isoformat(),
         "date": rec_date.isoformat(),
         "ticker": ticker,
+        "direction": direction,
         "entry_price": float(entry_price),
         "latest_price": float(latest_price or 0.0),
         "ticker_return_pct": float(ticker_return),
         "spy_return_pct": float(spy_return),
+        "position_return_pct": float(position_return),
+        "benchmark_return_pct": float(benchmark_return),
         "alpha_return_pct": float(alpha),
         "learning_reward": float(reward),
         "score": _safe_float(row.get("score")) or 0.0,
@@ -400,7 +438,8 @@ def _append_outcome_records(records: list[dict]) -> None:
         combined = combined.tail(MAX_OUTCOME_ROWS)
     ordered = [column for column in [
         "evaluation_id", "evaluated_at", "date", "ticker", "entry_price", "latest_price",
-        "ticker_return_pct", "spy_return_pct", "alpha_return_pct", "learning_reward",
+        "direction", "ticker_return_pct", "spy_return_pct", "position_return_pct",
+        "benchmark_return_pct", "alpha_return_pct", "learning_reward",
         "score", "recommendation_confidence", "regime",
     ] if column in combined.columns]
     ordered += [column for column in combined.columns if column not in ordered]

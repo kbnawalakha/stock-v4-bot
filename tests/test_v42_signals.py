@@ -14,7 +14,13 @@ import learning
 from analyst_revisions import analyst_revision_score
 from insider_buying import insider_buying_score
 from fmp_client import FMPClient
-from main_v4 import quality_liquidity_filter, recommendation_confidence, swing_recommendations
+from main_v4 import (
+    high_quality_long_candidate,
+    quality_liquidity_filter,
+    recommendation_confidence,
+    short_swing_recommendations,
+    swing_recommendations,
+)
 from market_breadth import market_breadth_regime
 from opening_activity import _session_activity_score
 from scoring import apply_reddit_blend, regime_adjusted_weights
@@ -216,6 +222,9 @@ class V42SignalTests(unittest.TestCase):
         result = bear_case_score(df)
         self.assertGreaterEqual(result["score"], 65.0)
         self.assertIn("reason", result)
+        self.assertGreater(result["entry_price"], 0.0)
+        self.assertGreater(result["stop_loss"], result["entry_price"])
+        self.assertLess(result["target_price"], result["entry_price"])
 
     def test_recommendation_confidence_filters_weak_rows(self):
         weak = {
@@ -255,6 +264,71 @@ class V42SignalTests(unittest.TestCase):
         self.assertEqual(selected[0]["ticker"], "T6")
         self.assertNotIn("WEAK", [row["ticker"] for row in selected])
         self.assertNotIn("LOWRR", [row["ticker"] for row in selected])
+
+    def test_high_quality_long_candidate_requires_real_upside_edge(self):
+        strong = {
+            "ticker": "GOOD",
+            "recommendation_confidence": 74,
+            "score": 66,
+            "quality_score": 65,
+            "risk_quality": 58,
+            "liquidity_score": 82,
+            "swing_setup": 78,
+            "pattern_trading": 72,
+            "trend": 76,
+            "options_flow": 68,
+            "news_sentiment": 55,
+            "volume_accumulation": 70,
+            "catalyst_score": 58,
+            "analyst_revisions": 55,
+            "fundamental_momentum": 61,
+            "swing_details": {"risk_reward": 1.4},
+            "bear_case_details": {"score": 0},
+        }
+        bearish = {**strong, "ticker": "BAD", "bear_case_details": {"score": 82}}
+        low_quality = {**strong, "ticker": "LOWQ", "quality_score": 52}
+        no_plan = {**strong, "ticker": "NOPLAN", "swing_details": {"risk_reward": 0.4}, "options_flow": 60, "news_sentiment": 55, "catalyst_score": 55}
+
+        self.assertTrue(high_quality_long_candidate(strong, 68))
+        self.assertFalse(high_quality_long_candidate(bearish, 68))
+        self.assertFalse(high_quality_long_candidate(low_quality, 68))
+        self.assertFalse(high_quality_long_candidate(no_plan, 68))
+
+    def test_short_swing_recommendations_require_bear_score_and_rr(self):
+        rows = [
+            {
+                "ticker": "SHORT",
+                "price": 50,
+                "bear_score": 84,
+                "entry_price": 50,
+                "stop_loss": 54,
+                "target_price": 42,
+                "risk_reward": 2.0,
+                "setup_type": "breakdown",
+            },
+            {
+                "ticker": "LOWRR",
+                "price": 50,
+                "bear_score": 90,
+                "entry_price": 50,
+                "stop_loss": 58,
+                "target_price": 47,
+                "risk_reward": 0.4,
+                "setup_type": "breakdown",
+            },
+            {
+                "ticker": "WEAK",
+                "price": 50,
+                "bear_score": 60,
+                "entry_price": 50,
+                "stop_loss": 54,
+                "target_price": 42,
+                "risk_reward": 2.0,
+                "setup_type": "weak",
+            },
+        ]
+        selected = short_swing_recommendations(rows)
+        self.assertEqual([row["ticker"] for row in selected], ["SHORT"])
 
     def test_learning_evaluates_prior_recommendations_and_writes_outcomes(self):
         with tempfile.TemporaryDirectory() as tmpdir:

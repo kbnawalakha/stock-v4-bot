@@ -169,13 +169,14 @@ def _setup_component(
 
 def bear_case_score(df: pd.DataFrame) -> dict[str, float | str]:
     if df.empty or len(df) < 120 or not {"Open", "High", "Low", "Close", "Volume"}.issubset(df.columns):
-        return {"score": 0.0, "setup_type": "unavailable", "reason": "not enough bearish setup data"}
+        return _empty_bear("unavailable", "not enough bearish setup data")
 
     close = df["Close"]
     high = df["High"]
     low = df["Low"]
     volume = df["Volume"]
     price = float(close.iloc[-1])
+    atr = _atr(df)
     ma10 = close.rolling(10).mean()
     ma20 = close.rolling(20).mean()
     ma50 = close.rolling(50).mean()
@@ -205,13 +206,20 @@ def bear_case_score(df: pd.DataFrame) -> dict[str, float | str]:
         reasons.append("price is making lower highs and lower lows")
 
     if not components:
-        return {"score": 0.0, "setup_type": "no strong bear case", "reason": "no strong bearish swing pattern confirmed"}
+        return _empty_bear("no strong bear case", "no strong bearish swing pattern confirmed")
 
     score = _clamp(float(np.mean(components)))
+    rr_details = _short_risk_reward(price, high, low, atr.iloc[-1])
     return {
         "score": score,
         "setup_type": reasons[0],
         "reason": "; ".join(reasons[:3]) + ".",
+        "entry_price": round(price, 2),
+        "stop_loss": round(rr_details["stop_loss"], 2),
+        "target_price": round(rr_details["target_price"], 2),
+        "risk_reward": round(rr_details["risk_reward"], 2),
+        "atr_pct": round(float(atr.iloc[-1] / price * 100), 2) if atr.iloc[-1] > 0 and price > 0 else 0.0,
+        "holding_period_days": 3 if "breakdown" in reasons[0] else 7,
     }
 
 
@@ -345,6 +353,23 @@ def _risk_reward(price: float, high: pd.Series, low: pd.Series, atr: float) -> d
     }
 
 
+def _short_risk_reward(price: float, high: pd.Series, low: pd.Series, atr: float) -> dict[str, float]:
+    atr = float(atr) if atr and atr > 0 else price * 0.04
+    recent_resistance = float(high.tail(10).max())
+    stop_loss = max(price + atr * 1.5, recent_resistance + atr * 0.25)
+    support = float(low.tail(55).min())
+    target_price = min(price - atr * 2.0, support)
+    target_price = max(0.01, target_price)
+    risk = max(stop_loss - price, 0.01)
+    reward = max(price - target_price, 0.0)
+    rr = reward / risk if risk > 0 else 0.0
+    return {
+        "stop_loss": stop_loss,
+        "target_price": target_price,
+        "risk_reward": rr,
+    }
+
+
 def _atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
     high = df["High"]
     low = df["Low"]
@@ -388,4 +413,18 @@ def _empty(reason: str) -> dict[str, float | str | int]:
         "confirmation": 50.0,
         "directional_bias": 0,
         "reason": reason,
+    }
+
+
+def _empty_bear(setup_type: str, reason: str) -> dict[str, float | str | int]:
+    return {
+        "score": 0.0,
+        "setup_type": setup_type,
+        "reason": reason,
+        "entry_price": 0.0,
+        "stop_loss": 0.0,
+        "target_price": 0.0,
+        "risk_reward": 0.0,
+        "atr_pct": 0.0,
+        "holding_period_days": 0,
     }

@@ -12,6 +12,15 @@ from config import (
     BEAR_CASE_N,
     SWING_RECOMMENDATION_N,
     MIN_SWING_RISK_REWARD,
+    SHORT_SWING_RECOMMENDATION_N,
+    MIN_SHORT_SWING_RISK_REWARD,
+    MIN_SHORT_BEAR_SCORE,
+    DEFAULT_MIN_RECOMMENDATION_CONFIDENCE,
+    MIN_LONG_SCORE,
+    MIN_LONG_QUALITY_SCORE,
+    MIN_LONG_RISK_QUALITY,
+    MIN_LONG_LIQUIDITY_SCORE,
+    MIN_LONG_UPSIDE_EDGE,
     UNDER_30_N,
     EARNINGS_N,
     CATALYST_N,
@@ -193,6 +202,51 @@ def recommendation_confidence(row: dict, regime: dict | None = None) -> float:
         + data_bonus
     )
     return max(0.0, min(100.0, float(confidence)))
+
+
+def high_quality_long_filter_reason(row: dict, min_confidence: float) -> str:
+    checks = [
+        (row.get("recommendation_confidence", 0) >= min_confidence, "confidence below threshold"),
+        (row.get("score", 0) >= MIN_LONG_SCORE, "blended score below threshold"),
+        (row.get("quality_score", 0) >= MIN_LONG_QUALITY_SCORE, "quality score below threshold"),
+        (row.get("risk_quality", 0) >= MIN_LONG_RISK_QUALITY, "risk quality below threshold"),
+        (row.get("liquidity_score", 0) >= MIN_LONG_LIQUIDITY_SCORE, "liquidity below threshold"),
+        (upside_edge_score(row) >= MIN_LONG_UPSIDE_EDGE, "no strong upside edge"),
+        (float((row.get("bear_case_details") or {}).get("score", 0.0) or 0.0) < MIN_SHORT_BEAR_SCORE, "strong bearish swing setup present"),
+        (_has_tradeable_upside_plan(row), "no tradeable long edge or risk/reward"),
+    ]
+    for passed, reason in checks:
+        if not passed:
+            return reason
+    return "passed"
+
+
+def high_quality_long_candidate(row: dict, min_confidence: float) -> bool:
+    return high_quality_long_filter_reason(row, min_confidence) == "passed"
+
+
+def upside_edge_score(row: dict) -> float:
+    return max(
+        float(row.get("swing_setup", 0.0) or 0.0),
+        float(row.get("pattern_trading", 0.0) or 0.0),
+        float(row.get("trend", 0.0) or 0.0),
+        float(row.get("options_flow", 0.0) or 0.0),
+        float(row.get("news_sentiment", 0.0) or 0.0),
+        float(row.get("volume_accumulation", 0.0) or 0.0),
+        float(row.get("catalyst_score", 0.0) or 0.0),
+        float(row.get("analyst_revisions", 0.0) or 0.0),
+        float(row.get("fundamental_momentum", 0.0) or 0.0),
+    )
+
+
+def _has_tradeable_upside_plan(row: dict) -> bool:
+    swing_rr = swing_recommendation_risk_reward(row)
+    return (
+        swing_rr >= MIN_SWING_RISK_REWARD
+        or float(row.get("catalyst_score", 0.0) or 0.0) >= 68.0
+        or float(row.get("news_sentiment", 0.0) or 0.0) >= 70.0
+        or float(row.get("options_flow", 0.0) or 0.0) >= 72.0
+    )
 
 
 def env_int(name: str, default: int) -> int:
@@ -472,6 +526,11 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
                     "bear_score": bear["score"],
                     "setup_type": bear.get("setup_type", ""),
                     "reason": bear.get("reason", ""),
+                    "entry_price": bear.get("entry_price", quality_details.get("price", 0.0)),
+                    "stop_loss": bear.get("stop_loss", 0.0),
+                    "target_price": bear.get("target_price", 0.0),
+                    "risk_reward": bear.get("risk_reward", 0.0),
+                    "holding_period_days": bear.get("holding_period_days", 0),
                     "trend": features["trend"],
                     "relative_strength": features["relative_strength"],
                     "sector_strength": features["sector_strength"],
@@ -643,23 +702,33 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
         row["top_drivers"] = top_drivers(row)
         row["top_risks"] = top_risks(row)
 
-    min_confidence = env_float("MIN_RECOMMENDATION_CONFIDENCE", 55.0)
+    min_confidence = env_float("MIN_RECOMMENDATION_CONFIDENCE", DEFAULT_MIN_RECOMMENDATION_CONFIDENCE)
     # Regime gate: in a weak/RISK_OFF tape, demand higher conviction before issuing a
     # swing-long. Stops the bot from confidently recommending longs into a falling market.
     if str(regime.get("regime")) == "RISK_OFF":
         min_confidence = min(95.0, min_confidence + 8.0)
         log_event("risk_off_confidence_gate", min_confidence=min_confidence)
-    max_recommendations = env_int("MAX_RECOMMENDATIONS", MAX_RECOMMENDATIONS)
+    requested_max = env_int("MAX_RECOMMENDATIONS", MAX_RECOMMENDATIONS)
+    max_recommendations = max(0, min(requested_max, MAX_RECOMMENDATIONS))
     ranked_final = sorted(top_20, key=lambda x: (x.get("recommendation_confidence", 0), x["score"]), reverse=True)
-    final_results = [row for row in ranked_final if row.get("recommendation_confidence", 0) >= min_confidence][:max_recommendations]
+    excluded_reasons = {
+        row["ticker"]: high_quality_long_filter_reason(row, min_confidence)
+        for row in ranked_final
+        if not high_quality_long_candidate(row, min_confidence)
+    }
+    final_results = [
+        row for row in ranked_final
+        if high_quality_long_candidate(row, min_confidence)
+    ][:max_recommendations]
     update_universe_stages(universe_summary, final_top_10=[r["ticker"] for r in final_results])
     log_event(
         "final_recommendations",
         count=len(final_results),
         min_confidence=min_confidence,
         max_recommendations=max_recommendations,
+        requested_max_recommendations=requested_max,
         tickers=[r["ticker"] for r in final_results],
-        excluded_low_confidence=[r["ticker"] for r in ranked_final if r.get("recommendation_confidence", 0) < min_confidence],
+        excluded=[{"ticker": ticker, "reason": reason} for ticker, reason in list(excluded_reasons.items())[:20]],
     )
     sectors = sector_extreme_signals(spy_df, qqq_df)
     return final_results, spy_df, qqq_df, regime, sectors, reddit_plays, universe_summary, bear_cases
@@ -757,6 +826,70 @@ def swing_recommendations(rows: list[dict]) -> list[dict]:
     return sorted(candidates, key=swing_recommendation_score, reverse=True)[:SWING_RECOMMENDATION_N]
 
 
+def short_swing_risk_reward(row: dict) -> float:
+    try:
+        return float(row.get("risk_reward", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def short_swing_score(row: dict) -> float:
+    rr_bonus = min(3.0, short_swing_risk_reward(row)) * 8.0
+    return float(row.get("bear_score", 0.0) or 0.0) + rr_bonus
+
+
+def short_swing_recommendations(rows: list[dict]) -> list[dict]:
+    candidates = []
+    for row in rows:
+        entry = float(row.get("entry_price", row.get("price", 0.0)) or 0.0)
+        stop = float(row.get("stop_loss", 0.0) or 0.0)
+        target = float(row.get("target_price", 0.0) or 0.0)
+        if (
+            float(row.get("bear_score", 0.0) or 0.0) >= MIN_SHORT_BEAR_SCORE
+            and short_swing_risk_reward(row) >= MIN_SHORT_SWING_RISK_REWARD
+            and entry > 0
+            and stop > entry
+            and 0 < target < entry
+        ):
+            candidates.append(row)
+    return sorted(candidates, key=short_swing_score, reverse=True)[:SHORT_SWING_RECOMMENDATION_N]
+
+
+def short_swing_tracking_rows(rows: list[dict]) -> list[dict]:
+    tracked = []
+    for row in rows:
+        tracked.append({
+            "ticker": row["ticker"],
+            "direction": "SHORT",
+            "price": float(row.get("entry_price", row.get("price", 0.0)) or 0.0),
+            "score": min(100.0, short_swing_score(row)),
+            "recommendation_confidence": min(100.0, float(row.get("bear_score", 0.0) or 0.0) + short_swing_risk_reward(row) * 5.0),
+            "bear_case_score": float(row.get("bear_score", 0.0) or 0.0),
+            "bear_case_reason": row.get("reason", ""),
+            "trend": row.get("trend", 50.0),
+            "relative_strength": row.get("relative_strength", 0.0),
+            "sector_strength": row.get("sector_strength", 0.0),
+            "risk_quality": row.get("risk_quality", 50.0),
+            "top_drivers": [
+                row.get("setup_type", "bearish swing setup"),
+                f"short risk/reward {short_swing_risk_reward(row):.2f}",
+            ],
+            "top_risks": ["short squeezes can move quickly against the setup"],
+            "swing_details": {
+                "entry_price": row.get("entry_price", row.get("price", 0.0)),
+                "stop_loss": row.get("stop_loss", 0.0),
+                "target_price": row.get("target_price", 0.0),
+                "risk_reward": short_swing_risk_reward(row),
+                "setup_type": row.get("setup_type", ""),
+            },
+            "bear_case_details": {
+                "score": row.get("bear_score", 0.0),
+                "reason": row.get("reason", ""),
+            },
+        })
+    return tracked
+
+
 def html_swing_recommendations(rows):
     html = """
     <h2 style="margin-top:28px;border-bottom:2px solid #222;padding-bottom:6px;">Swing Recommendations</h2>
@@ -784,6 +917,36 @@ def html_swing_recommendations(rows):
           <td align="right" style="border:1px solid #ddd;vertical-align:top;">${float(details.get("stop_loss", 0)):.2f}</td>
           <td align="right" style="border:1px solid #ddd;vertical-align:top;">${float(details.get("target_price", 0)):.2f}</td>
           <td style="border:1px solid #ddd;vertical-align:top;">{escape(str(details.get("setup_type", "")))}<br><span style="color:#666;">R/R {float(details.get("risk_reward", 0)):.2f}</span></td>
+        </tr>
+        """
+    html += "</table>"
+    return html
+
+
+def html_short_swing_recommendations(rows):
+    html = """
+    <h2 style="margin-top:28px;border-bottom:2px solid #222;padding-bottom:6px;">Short Swing Ideas</h2>
+    <table width="100%" cellpadding="8" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px;">
+      <tr style="background:#f2f2f2;">
+        <th align="left" style="border:1px solid #ddd;">Ticker</th>
+        <th align="right" style="border:1px solid #ddd;">Bear</th>
+        <th align="right" style="border:1px solid #ddd;">Entry</th>
+        <th align="right" style="border:1px solid #ddd;">Stop</th>
+        <th align="right" style="border:1px solid #ddd;">Target</th>
+        <th align="left" style="border:1px solid #ddd;">Setup</th>
+      </tr>
+    """
+    if not rows:
+        html += '<tr><td colspan="6" style="border:1px solid #ddd;">No high-quality short swing ideas today.</td></tr>'
+    for row in rows:
+        html += f"""
+        <tr>
+          <td style="border:1px solid #ddd;vertical-align:top;"><b>{escape(row["ticker"])}</b><br><span style="color:#666;">${float(row.get("price", 0)):.2f}</span></td>
+          <td align="right" style="border:1px solid #ddd;vertical-align:top;">{float(row.get("bear_score", 0)):.0f}</td>
+          <td align="right" style="border:1px solid #ddd;vertical-align:top;">${float(row.get("entry_price", row.get("price", 0))):.2f}</td>
+          <td align="right" style="border:1px solid #ddd;vertical-align:top;">${float(row.get("stop_loss", 0)):.2f}</td>
+          <td align="right" style="border:1px solid #ddd;vertical-align:top;">${float(row.get("target_price", 0)):.2f}</td>
+          <td style="border:1px solid #ddd;vertical-align:top;">{escape(str(row.get("setup_type", "")))}<br><span style="color:#666;">R/R {short_swing_risk_reward(row):.2f}</span></td>
         </tr>
         """
     html += "</table>"
@@ -923,7 +1086,7 @@ def html_universe_summary(summary):
         ("Quality universe", len(summary.get("stage1_quality_universe", [])), ", ".join(f"{escape(str(k))}: {v}" for k, v in removed.items() if v) or "no removals recorded"),
         ("Opportunity candidates", len(summary.get("stage2_opportunity_candidates", [])), ", ".join(summary.get("stage2_opportunity_candidates", [])[:12])),
         ("Deep analysis candidates", len(summary.get("stage3_deep_analysis_candidates", [])), ", ".join(summary.get("stage3_deep_analysis_candidates", [])[:12])),
-        ("Final top 10", len(summary.get("final_top_10", [])), ", ".join(summary.get("final_top_10", []))),
+        ("Final recommendations", len(summary.get("final_top_10", [])), ", ".join(summary.get("final_top_10", []))),
     ]
     for label, count, details in rows:
         html += f"""
@@ -953,7 +1116,7 @@ def universe_summary_text(summary):
         f"Quality universe: {len(summary.get('stage1_quality_universe', []))}",
         f"Opportunity candidates: {len(summary.get('stage2_opportunity_candidates', []))}",
         f"Deep analysis candidates: {len(summary.get('stage3_deep_analysis_candidates', []))}",
-        f"Final top 10: {', '.join(summary.get('final_top_10', []))}",
+        f"Final recommendations: {', '.join(summary.get('final_top_10', []))}",
         f"Sources: {summary.get('sources_used', {})}",
         f"Removed: {summary.get('removed', {})}",
         f"Warnings: {len(summary.get('errors', []))}",
@@ -990,6 +1153,7 @@ def build_email(
         reverse=True,
     )[:CATALYST_N]
     swing_watch = swing_recommendations(results)
+    short_swing_watch = short_swing_recommendations(bear_cases or [])
 
     political_watch = sorted(
         [r for r in results if r.get("political_geo", 0) >= 20 or r.get("politician_trade", 0) >= 10],
@@ -1019,6 +1183,7 @@ def build_email(
       {html_table("Top 5 Earnings Setups", earnings, reason_mode="earnings")}
       {html_table("Catalyst Watch", catalyst_watch, reason_mode="catalyst")}
       {html_swing_recommendations(swing_watch)}
+      {html_short_swing_recommendations(short_swing_watch)}
       {html_table("Political / Geopolitical Watch", political_watch, reason_mode="political")}
 
       <p style="color:#777;font-size:12px;margin-top:28px;">
@@ -1115,8 +1280,21 @@ def build_email(
                     f"R/R {float(details.get('risk_reward', 0)):.2f}\n"
                     f"Setup: {details.get('setup_type', '')}\n"
                 )
+            text += "\nShort Swing Ideas\n"
+            if not short_swing_watch:
+                text += "No high-quality short swing ideas today.\n"
+            for r in short_swing_watch:
+                text += (
+                    f"{r['ticker']} | Bear {float(r.get('bear_score', 0)):.0f}\n"
+                    f"Entry ${float(r.get('entry_price', r.get('price', 0))):.2f} | "
+                    f"Stop ${float(r.get('stop_loss', 0)):.2f} | "
+                    f"Target ${float(r.get('target_price', 0)):.2f} | "
+                    f"R/R {short_swing_risk_reward(r):.2f}\n"
+                    f"Setup: {r.get('setup_type', '')}\n"
+                )
 
-    return html, text, top_10
+    tracked_recommendations = top_10 + short_swing_tracking_rows(short_swing_watch)
+    return html, text, tracked_recommendations
 
 
 def main():
@@ -1124,7 +1302,7 @@ def main():
     log_event("learned_weights", weights=learned_weights)
     results, spy_df, qqq_df, regime, sector_extremes, reddit_plays, universe_summary, bear_cases = analyze_universe(learned_weights)
     previous_downside_alerts = historical_downside_alerts()
-    html, text, top_10 = build_email(
+    html, text, tracked_recommendations = build_email(
         results,
         spy_df,
         qqq_df,
@@ -1137,7 +1315,7 @@ def main():
     )
 
     print(text)
-    log_predictions(top_10)
+    log_predictions(tracked_recommendations)
     send_email("Daily Stock Alpha Report", html, text)
 
 

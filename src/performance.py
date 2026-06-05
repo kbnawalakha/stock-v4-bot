@@ -17,14 +17,15 @@ def log_predictions(rows: list[dict]) -> None:
     for rank, row in enumerate(rows, start=1):
         ticker = str(row.get("ticker", "")).upper()
         record = dict(row)
+        direction = str(record.get("direction", "BULL") or "BULL").upper()
         swing_details = row.get("swing_details", {}) or {}
         bear_details = row.get("bear_case_details", {}) or {}
         record.update({
             "date": today,
             "sent_at_utc": sent_at,
             "rank": rank,
-            "recommendation_id": f"{today}:{ticker}:{rank}",
-            "direction": "BULL",
+            "recommendation_id": f"{today}:{ticker}:{direction}:{rank}",
+            "direction": direction,
             "top_drivers": _join_text(row.get("top_drivers", [])),
             "top_risks": _join_text(row.get("top_risks", [])),
             "swing_entry": swing_details.get("entry_price"),
