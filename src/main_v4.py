@@ -21,6 +21,12 @@ from config import (
     MIN_LONG_RISK_QUALITY,
     MIN_LONG_LIQUIDITY_SCORE,
     MIN_LONG_UPSIDE_EDGE,
+    MIN_RECOMMENDATION_SCORE,
+    WATCHLIST_N,
+    BEARISH_NEWS_SCORE_CAP,
+    VERY_BEARISH_NEWS_SCORE_CAP,
+    BEARISH_NEWS_CONFIDENCE_CAP,
+    NEGATIVE_CATALYST_SCORE_CAP,
     UNDER_30_N,
     EARNINGS_N,
     CATALYST_N,
@@ -46,8 +52,8 @@ from indicators import (
     breakout_score,
     risk_quality_score,
 )
-from news_catalyst import news_catalyst_score, get_recent_headlines
-from gemini_sentiment import analyze_reddit_plays, score_overnight_sentiments
+from news_catalyst import catalyst_details, get_recent_headlines
+from gemini_sentiment import analyze_reddit_plays, gemini_usage_summary, score_overnight_sentiments
 from reddit_client import extract_reddit_candidates, fetch_reddit_posts
 from opening_activity import opening_activity_score
 from options_flow import options_flow_score
@@ -85,6 +91,15 @@ def log_event(event: str, **payload):
 
 
 def upside_reason(row: dict, reason_mode: str = "normal") -> str:
+    if row.get("catalyst_polarity") == "NEGATIVE":
+        risks = []
+        if row.get("catalysts"):
+            risks.append(f'a negative catalyst is in play: "{row["catalysts"][0]}"')
+        risks.extend(top_risks(row))
+        if row.get("sentiment_reasoning") and row.get("sentiment_confidence", 0) > 0:
+            risks.append(f"Gemini sentiment note: {row['sentiment_reasoning']}")
+        return f"{row['ticker']} has downside risk because " + ", ".join(risks[:3]) + "."
+
     drivers = []
     if row.get("opening_activity", 0) >= 70:
         drivers.append("buyers showed up early with strong opening activity")
@@ -97,6 +112,8 @@ def upside_reason(row: dict, reason_mode: str = "normal") -> str:
 
     if row.get("news_sentiment", 0) >= 70:
         drivers.append("overnight news sentiment is bullish")
+    if row.get("catalyst_polarity") == "POSITIVE":
+        drivers.append("fresh catalyst flow is positive")
     if row.get("options_flow", 0) >= 70:
         drivers.append("options flow is leaning bullish")
     if row.get("pattern_trading", 0) >= 70:
@@ -160,7 +177,7 @@ def top_drivers(row: dict) -> list[str]:
         ("etf_flow_exposure", "supportive sector ETF flow proxy"),
     ]
     for key, label in checks:
-        value = float(row.get(key, 50.0))
+        value = safe_float(row.get(key), 50.0)
         if value >= 65:
             candidates.append((value, label))
     return [label for _, label in sorted(candidates, reverse=True)[:3]] or ["balanced multi-factor setup"]
@@ -168,50 +185,57 @@ def top_drivers(row: dict) -> list[str]:
 
 def top_risks(row: dict) -> list[str]:
     risks = []
-    if row.get("liquidity_score", 100) < 60:
+    if safe_float(row.get("liquidity_score"), 100.0) < 60:
         risks.append("liquidity is thinner than preferred")
-    if row.get("risk_quality", 100) < 45:
+    if safe_float(row.get("risk_quality"), 100.0) < 45:
         risks.append("volatility/risk quality is weak")
-    if row.get("swing_setup", 50) < 45:
+    if safe_float(row.get("swing_setup"), 50.0) < 45:
         risks.append(row.get("swing_details", {}).get("reason", "swing setup is weak"))
-    if row.get("earnings_quality", 50) < 40:
+    if safe_float(row.get("earnings_quality"), 50.0) < 40:
         risks.append("earnings quality is soft")
-    if row.get("analyst_revisions", 50) < 40:
+    if safe_float(row.get("analyst_revisions"), 50.0) < 40:
         risks.append("analyst revisions are negative")
-    if row.get("news_sentiment", 50) < 45:
+    if safe_float(row.get("news_sentiment"), 50.0) < 45:
         risks.append("news sentiment is not supportive")
+    if row.get("catalyst_polarity") == "NEGATIVE":
+        risks.append("fresh catalyst flow is negative")
+    if row.get("score_cap_reason"):
+        risks.append(row["score_cap_reason"])
     return risks[:2] or ["no major model risk flagged"]
 
 
 def recommendation_confidence(row: dict, regime: dict | None = None) -> float:
     regime = regime or {}
     data_bonus = 0.0
-    if row.get("sentiment_confidence", 0) > 0:
-        data_bonus += min(10.0, float(row.get("sentiment_confidence", 0)) * 10)
-    if row.get("swing_details", {}).get("risk_reward", 0) >= 1.5:
+    sentiment_confidence = safe_float(row.get("sentiment_confidence"), 0.0)
+    if sentiment_confidence > 0:
+        data_bonus += min(10.0, sentiment_confidence * 10)
+    if safe_float(row.get("swing_details", {}).get("risk_reward"), 0.0) >= 1.5:
         data_bonus += 8.0
     if row.get("pre_market_activity", 50) != 50 or row.get("post_market_activity", 50) != 50:
         data_bonus += 4.0
     confidence = (
-        row.get("score", 0) * 0.35
-        + row.get("swing_setup", 50) * 0.25
-        + row.get("quality_score", 50) * 0.15
-        + row.get("risk_quality", 50) * 0.10
-        + row.get("catalyst_score", 50) * 0.10
-        + float(regime.get("confidence", 0.5)) * 5.0
+        safe_float(row.get("score"), 0.0) * 0.35
+        + safe_float(row.get("swing_setup"), 50.0) * 0.25
+        + safe_float(row.get("quality_score"), 50.0) * 0.15
+        + safe_float(row.get("risk_quality"), 50.0) * 0.10
+        + safe_float(row.get("catalyst_score"), 50.0) * 0.10
+        + safe_float(regime.get("confidence"), 0.5) * 5.0
         + data_bonus
     )
     return max(0.0, min(100.0, float(confidence)))
 
 
-def high_quality_long_filter_reason(row: dict, min_confidence: float) -> str:
+def high_quality_long_filter_reason(row: dict, min_confidence: float, min_score: float = MIN_RECOMMENDATION_SCORE) -> str:
     checks = [
         (row.get("recommendation_confidence", 0) >= min_confidence, "confidence below threshold"),
-        (row.get("score", 0) >= MIN_LONG_SCORE, "blended score below threshold"),
+        (row.get("score", 0) >= max(MIN_LONG_SCORE, min_score), "score below threshold"),
         (row.get("quality_score", 0) >= MIN_LONG_QUALITY_SCORE, "quality score below threshold"),
         (row.get("risk_quality", 0) >= MIN_LONG_RISK_QUALITY, "risk quality below threshold"),
         (row.get("liquidity_score", 0) >= MIN_LONG_LIQUIDITY_SCORE, "liquidity below threshold"),
         (upside_edge_score(row) >= MIN_LONG_UPSIDE_EDGE, "no strong upside edge"),
+        (row.get("catalyst_polarity") != "NEGATIVE", "negative catalyst"),
+        (not row.get("score_cap_reason"), "bearish news cap active"),
         (float((row.get("bear_case_details") or {}).get("score", 0.0) or 0.0) < MIN_SHORT_BEAR_SCORE, "strong bearish swing setup present"),
         (_has_tradeable_upside_plan(row), "no tradeable long edge or risk/reward"),
     ]
@@ -221,8 +245,8 @@ def high_quality_long_filter_reason(row: dict, min_confidence: float) -> str:
     return "passed"
 
 
-def high_quality_long_candidate(row: dict, min_confidence: float) -> bool:
-    return high_quality_long_filter_reason(row, min_confidence) == "passed"
+def high_quality_long_candidate(row: dict, min_confidence: float, min_score: float = MIN_RECOMMENDATION_SCORE) -> bool:
+    return high_quality_long_filter_reason(row, min_confidence, min_score) == "passed"
 
 
 def upside_edge_score(row: dict) -> float:
@@ -239,6 +263,15 @@ def upside_edge_score(row: dict) -> float:
     )
 
 
+def safe_float(value, default: float = 0.0) -> float:
+    if value is None:
+        return float(default)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
 def _has_tradeable_upside_plan(row: dict) -> bool:
     swing_rr = swing_recommendation_risk_reward(row)
     return (
@@ -247,6 +280,69 @@ def _has_tradeable_upside_plan(row: dict) -> bool:
         or float(row.get("news_sentiment", 0.0) or 0.0) >= 70.0
         or float(row.get("options_flow", 0.0) or 0.0) >= 72.0
     )
+
+
+def apply_bearish_news_caps(row: dict) -> None:
+    caps = []
+    score_cap = 100.0
+    confidence_cap = 100.0
+    sentiment = safe_float(row.get("news_sentiment"), 50.0)
+    sentiment_confidence = safe_float(row.get("sentiment_confidence"), 0.0)
+    catalyst_polarity = str(row.get("catalyst_polarity", "NONE") or "NONE")
+
+    if sentiment_confidence >= 0.40 and sentiment <= 40.0:
+        score_cap = min(score_cap, BEARISH_NEWS_SCORE_CAP)
+        confidence_cap = min(confidence_cap, BEARISH_NEWS_CONFIDENCE_CAP)
+        caps.append("bearish Gemini/news sentiment")
+    if sentiment_confidence >= 0.55 and sentiment <= 30.0:
+        score_cap = min(score_cap, VERY_BEARISH_NEWS_SCORE_CAP)
+        confidence_cap = min(confidence_cap, BEARISH_NEWS_CONFIDENCE_CAP - 8.0)
+        caps.append("very bearish Gemini/news sentiment")
+    if catalyst_polarity == "NEGATIVE":
+        score_cap = min(score_cap, NEGATIVE_CATALYST_SCORE_CAP)
+        confidence_cap = min(confidence_cap, BEARISH_NEWS_CONFIDENCE_CAP)
+        caps.append("negative catalyst classification")
+
+    if caps:
+        row["score_before_news_cap"] = row.get("score", 0.0)
+        row["score"] = min(float(row.get("score", 0.0) or 0.0), score_cap)
+        row["recommendation_confidence_cap"] = confidence_cap
+        row["score_cap_reason"] = "; ".join(dict.fromkeys(caps))
+    else:
+        row["score_cap_reason"] = ""
+
+
+def watchlist_reason(row: dict, exclusion_reason: str | None = None) -> str:
+    if row.get("score_cap_reason"):
+        return f"watch only: {row['score_cap_reason']}"
+    if row.get("catalyst_polarity") == "NEGATIVE":
+        return "watch only: negative catalyst needs confirmation"
+    if exclusion_reason and exclusion_reason != "passed":
+        return f"not a buy yet: {exclusion_reason}"
+    if swing_recommendation_risk_reward(row) < MIN_SWING_RISK_REWARD:
+        return "watch only: swing risk/reward is not high enough"
+    return "watch only: setup is interesting but below buy threshold"
+
+
+def watchlist_candidates(ranked_rows: list[dict], final_results: list[dict], excluded_reasons: dict[str, str]) -> list[dict]:
+    final_tickers = {row["ticker"] for row in final_results}
+    candidates = []
+    for row in ranked_rows:
+        if row["ticker"] in final_tickers:
+            continue
+        interesting = (
+            float(row.get("score", 0.0) or 0.0) >= 50.0
+            or upside_edge_score(row) >= 60.0
+            or row.get("has_catalyst")
+            or row.get("catalyst_polarity") in {"POSITIVE", "NEGATIVE"}
+            or float(row.get("news_sentiment", 50.0) or 50.0) >= 65.0
+            or float((row.get("bear_case_details") or {}).get("score", 0.0) or 0.0) >= 65.0
+        )
+        if not interesting:
+            continue
+        row["watchlist_reason"] = watchlist_reason(row, excluded_reasons.get(row["ticker"]))
+        candidates.append(row)
+    return sorted(candidates, key=lambda x: (upside_edge_score(x), x.get("score", 0.0)), reverse=True)[:WATCHLIST_N]
 
 
 def env_int(name: str, default: int) -> int:
@@ -410,6 +506,7 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
             "stage2_opportunity_candidates": [],
             "stage3_deep_analysis_candidates": [],
             "final_top_10": [],
+            "final_recommendations": [],
             "sources_used": {"manual_seed_fallback": len(UNIVERSE)},
             "removed": {},
             "errors": [{"source": "universe_builder", "error": str(exc)}],
@@ -580,7 +677,8 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
         ticker = row["ticker"]
         try:
             headlines = get_recent_headlines(ticker)
-            news_score, catalysts, has_catalyst = news_catalyst_score(ticker)
+            catalyst = catalyst_details(ticker, headlines)
+            news_score = catalyst["score"]
             pg_score, pg_reasons = political_geo_score(ticker, headlines)
             pol_score, pol_reasons = politician_trade_score(ticker)
             earnings = earnings_score(ticker)
@@ -595,8 +693,12 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
                 "headlines": headlines,
                 "news_catalyst": news_score,
                 "news_sentiment": max(0.0, min(100.0, 50.0 + news_score / 2)),
-                "catalysts": catalysts,
-                "has_catalyst": has_catalyst,
+                "catalysts": catalyst["catalysts"],
+                "has_catalyst": catalyst["has_catalyst"],
+                "catalyst_polarity": catalyst["polarity"],
+                "catalyst_positive_hits": catalyst["positive_hits"],
+                "catalyst_negative_hits": catalyst["negative_hits"],
+                "catalyst_hits": catalyst["catalyst_hits"],
                 "political_geo": pg_score,
                 "politician_trade": pol_score,
                 "political_reasons": pg_reasons,
@@ -640,6 +742,7 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
                 analyst=row["analyst_revisions"],
                 institutional=row["institutional_ownership"],
                 catalyst=row["catalyst_score"],
+                catalyst_polarity=row.get("catalyst_polarity"),
             )
         except Exception as exc:
             log_event("stage3_ticker_failed", ticker=ticker, error=str(exc))
@@ -668,16 +771,18 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
             log_event("finnhub_news_enrichment_failed", ticker=row["ticker"], error=str(exc))
 
     sentiment_results = score_overnight_sentiments(top_20)
-    log_event("gemini_sentiment_batch", tickers=list(sentiment_results.keys()), calls_made=1)
+    log_event("gemini_sentiment_batch", tickers=list(sentiment_results.keys()), **gemini_usage_summary())
     for row in top_20:
         sentiment = sentiment_results.get(row["ticker"], {
             "sentiment": 50.0,
             "confidence": 0.0,
             "reasoning": "Gemini sentiment result missing; sentiment score neutral.",
+            "polarity": "NEUTRAL",
         })
         row["news_sentiment"] = sentiment["sentiment"]
         row["sentiment_confidence"] = sentiment["confidence"]
         row["sentiment_reasoning"] = sentiment["reasoning"]
+        row["sentiment_polarity"] = sentiment.get("polarity", "NEUTRAL")
         log_event("sentiment_score", ticker=row["ticker"], **sentiment)
 
     breadth = market_breadth_regime(universe_price_data)
@@ -696,13 +801,18 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
         row["market_breadth_score"] = breadth["breadth_score"]
         row["score"] = staged_final_score(row, regime, breadth, weights)
         row["score"] = apply_reddit_blend(row["score"], row, reddit_by_ticker, blend_reddit)
+        apply_bearish_news_caps(row)
         row["earnings_score"] = earnings_setup_score(row)
         row["catalyst_watch_score"] = catalyst_watch_score(row)
-        row["recommendation_confidence"] = recommendation_confidence(row, regime)
+        confidence = recommendation_confidence(row, regime)
+        if row.get("recommendation_confidence_cap"):
+            confidence = min(confidence, safe_float(row.get("recommendation_confidence_cap"), confidence))
+        row["recommendation_confidence"] = confidence
         row["top_drivers"] = top_drivers(row)
         row["top_risks"] = top_risks(row)
 
     min_confidence = env_float("MIN_RECOMMENDATION_CONFIDENCE", DEFAULT_MIN_RECOMMENDATION_CONFIDENCE)
+    min_score = env_float("MIN_RECOMMENDATION_SCORE", MIN_RECOMMENDATION_SCORE)
     # Regime gate: in a weak/RISK_OFF tape, demand higher conviction before issuing a
     # swing-long. Stops the bot from confidently recommending longs into a falling market.
     if str(regime.get("regime")) == "RISK_OFF":
@@ -712,26 +822,35 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
     max_recommendations = max(0, min(requested_max, MAX_RECOMMENDATIONS))
     ranked_final = sorted(top_20, key=lambda x: (x.get("recommendation_confidence", 0), x["score"]), reverse=True)
     excluded_reasons = {
-        row["ticker"]: high_quality_long_filter_reason(row, min_confidence)
+        row["ticker"]: high_quality_long_filter_reason(row, min_confidence, min_score)
         for row in ranked_final
-        if not high_quality_long_candidate(row, min_confidence)
+        if not high_quality_long_candidate(row, min_confidence, min_score)
     }
     final_results = [
         row for row in ranked_final
-        if high_quality_long_candidate(row, min_confidence)
+        if high_quality_long_candidate(row, min_confidence, min_score)
     ][:max_recommendations]
+    watchlist = watchlist_candidates(ranked_final, final_results, excluded_reasons)
     update_universe_stages(universe_summary, final_top_10=[r["ticker"] for r in final_results])
     log_event(
         "final_recommendations",
         count=len(final_results),
         min_confidence=min_confidence,
+        min_score=min_score,
         max_recommendations=max_recommendations,
         requested_max_recommendations=requested_max,
         tickers=[r["ticker"] for r in final_results],
         excluded=[{"ticker": ticker, "reason": reason} for ticker, reason in list(excluded_reasons.items())[:20]],
     )
+    log_event(
+        "recommendation_watchlist",
+        count=len(watchlist),
+        tickers=[r["ticker"] for r in watchlist],
+        reasons=[{"ticker": r["ticker"], "reason": r.get("watchlist_reason", "")} for r in watchlist],
+    )
+    log_event("gemini_usage_final", **gemini_usage_summary())
     sectors = sector_extreme_signals(spy_df, qqq_df)
-    return final_results, spy_df, qqq_df, regime, sectors, reddit_plays, universe_summary, bear_cases
+    return final_results, spy_df, qqq_df, regime, sectors, reddit_plays, universe_summary, bear_cases, watchlist
 
 
 def html_table(title, rows, reason_mode="normal"):
@@ -764,9 +883,29 @@ def html_table(title, rows, reason_mode="normal"):
     return html
 
 
+def compact_signal_summary(row: dict) -> str:
+    signals = [
+        f"Opening {safe_float(row.get('opening_activity'), 0):.0f}",
+        f"Trend {safe_float(row.get('trend'), 0):.0f}",
+        f"RS {safe_float(row.get('relative_strength'), 0):+.1f}",
+        f"Sector {safe_float(row.get('sector_strength'), 0):+.1f}",
+        f"Options {safe_float(row.get('options_flow'), 0):.0f}",
+        f"News {safe_float(row.get('news_sentiment'), 50):.0f} {row.get('sentiment_polarity', 'NEUTRAL')}",
+        f"Earnings {safe_float(row.get('earnings_quality', row.get('earnings')), 50):.0f}",
+        f"Pattern {safe_float(row.get('pattern_trading'), 0):.0f}",
+        f"R/R {swing_recommendation_risk_reward(row):.2f}",
+    ]
+    catalyst_polarity = row.get("catalyst_polarity")
+    if catalyst_polarity and catalyst_polarity != "NONE":
+        signals.append(f"Catalyst {catalyst_polarity}")
+    if row.get("score_cap_reason"):
+        signals.append(f"Cap: {row['score_cap_reason']}")
+    return "<br>".join(escape(str(item)) for item in signals)
+
+
 def html_top10_table(rows):
     html = """
-    <h2 style="margin-top:28px;border-bottom:2px solid #222;padding-bottom:6px;">Recommendations</h2>
+    <h2 style="margin-top:28px;border-bottom:2px solid #222;padding-bottom:6px;">Buy Recommendations</h2>
     <table width="100%" cellpadding="8" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px;">
       <tr style="background:#f2f2f2;">
         <th align="left" style="border:1px solid #ddd;">Ticker</th>
@@ -775,11 +914,12 @@ def html_top10_table(rows):
         <th align="right" style="border:1px solid #ddd;">Swing</th>
         <th align="right" style="border:1px solid #ddd;">Catalyst</th>
         <th align="right" style="border:1px solid #ddd;">Quality</th>
+        <th align="left" style="border:1px solid #ddd;">Signals</th>
         <th align="left" style="border:1px solid #ddd;">Drivers / Risks</th>
       </tr>
     """
     if not rows:
-        html += '<tr><td colspan="7" style="border:1px solid #ddd;">No high-confidence recommendations today.</td></tr>'
+        html += '<tr><td colspan="8" style="border:1px solid #ddd;">No high-confidence buy recommendations today.</td></tr>'
 
     for row in rows:
         drivers = "<br>".join(escape(item) for item in row.get("top_drivers", top_drivers(row))[:3])
@@ -794,12 +934,42 @@ def html_top10_table(rows):
           <td align="right" style="border:1px solid #ddd;vertical-align:top;">{row.get("swing_setup", 0):.0f}</td>
           <td align="right" style="border:1px solid #ddd;vertical-align:top;">{row.get("catalyst_score", 0):.0f}</td>
           <td align="right" style="border:1px solid #ddd;vertical-align:top;">{row.get("quality_score", 0):.0f}</td>
+          <td style="border:1px solid #ddd;vertical-align:top;">{compact_signal_summary(row)}</td>
           <td style="border:1px solid #ddd;vertical-align:top;">
             <b>Drivers</b><br>{drivers}<br>
             <b>Risks</b><br>{risks}<br>
             <span style="color:#666;">Freshness: {freshness}</span><br>
             <span style="color:#999;">Missing data: {warning}</span>
           </td>
+        </tr>
+        """
+    html += "</table>"
+    return html
+
+
+def html_watchlist_table(rows):
+    html = """
+    <h2 style="margin-top:28px;border-bottom:2px solid #222;padding-bottom:6px;">Watchlist</h2>
+    <table width="100%" cellpadding="8" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px;">
+      <tr style="background:#f2f2f2;">
+        <th align="left" style="border:1px solid #ddd;">Ticker</th>
+        <th align="right" style="border:1px solid #ddd;">Score</th>
+        <th align="right" style="border:1px solid #ddd;">Conf</th>
+        <th align="left" style="border:1px solid #ddd;">Signals</th>
+        <th align="left" style="border:1px solid #ddd;">Watch Reason</th>
+      </tr>
+    """
+    if not rows:
+        html += '<tr><td colspan="5" style="border:1px solid #ddd;">No separate watchlist names today.</td></tr>'
+
+    for row in rows:
+        html += f"""
+        <tr>
+          <td style="border:1px solid #ddd;vertical-align:top;"><b>{escape(row["ticker"])}</b><br><span style="color:#666;">${safe_float(row.get("price"), 0):.2f}</span></td>
+          <td align="right" style="border:1px solid #ddd;vertical-align:top;">{safe_float(row.get("score"), 0):.0f}</td>
+          <td align="right" style="border:1px solid #ddd;vertical-align:top;">{safe_float(row.get("recommendation_confidence"), 0):.0f}</td>
+          <td style="border:1px solid #ddd;vertical-align:top;">{compact_signal_summary(row)}</td>
+          <td style="border:1px solid #ddd;vertical-align:top;">{escape(row.get("watchlist_reason", "watch only"))}</td>
         </tr>
         """
     html += "</table>"
@@ -1072,6 +1242,7 @@ def html_universe_summary(summary):
     summary = summary or {}
     sources = summary.get("sources_used", {})
     removed = summary.get("removed", {})
+    final_recommendations = summary.get("final_recommendations", summary.get("final_top_10", []))
     html = """
     <h2 style="margin-top:28px;border-bottom:2px solid #222;padding-bottom:6px;">Universe Summary</h2>
     <table width="100%" cellpadding="8" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px;">
@@ -1086,7 +1257,7 @@ def html_universe_summary(summary):
         ("Quality universe", len(summary.get("stage1_quality_universe", [])), ", ".join(f"{escape(str(k))}: {v}" for k, v in removed.items() if v) or "no removals recorded"),
         ("Opportunity candidates", len(summary.get("stage2_opportunity_candidates", [])), ", ".join(summary.get("stage2_opportunity_candidates", [])[:12])),
         ("Deep analysis candidates", len(summary.get("stage3_deep_analysis_candidates", [])), ", ".join(summary.get("stage3_deep_analysis_candidates", [])[:12])),
-        ("Final recommendations", len(summary.get("final_top_10", [])), ", ".join(summary.get("final_top_10", []))),
+        ("Final recommendations", len(final_recommendations), ", ".join(final_recommendations)),
     ]
     for label, count, details in rows:
         html += f"""
@@ -1110,13 +1281,14 @@ def html_universe_summary(summary):
 
 def universe_summary_text(summary):
     summary = summary or {}
+    final_recommendations = summary.get("final_recommendations", summary.get("final_top_10", []))
     lines = [
         "Universe Summary",
         f"Raw universe: {len(summary.get('raw_universe', []))}",
         f"Quality universe: {len(summary.get('stage1_quality_universe', []))}",
         f"Opportunity candidates: {len(summary.get('stage2_opportunity_candidates', []))}",
         f"Deep analysis candidates: {len(summary.get('stage3_deep_analysis_candidates', []))}",
-        f"Final recommendations: {', '.join(summary.get('final_top_10', []))}",
+        f"Final recommendations: {', '.join(final_recommendations)}",
         f"Sources: {summary.get('sources_used', {})}",
         f"Removed: {summary.get('removed', {})}",
         f"Warnings: {len(summary.get('errors', []))}",
@@ -1134,29 +1306,37 @@ def build_email(
     universe_summary=None,
     bear_cases=None,
     historical_bear_alerts=None,
+    watchlist=None,
 ):
     now_pt = datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%Y-%m-%d %I:%M %p %Z")
     spy_20 = pct_return(spy_df, 20)
     qqq_20 = pct_return(qqq_df, 20)
 
-    top_10 = results
-    under_30 = [r for r in results if r["price"] < 30][:UNDER_30_N]
+    buy_recommendations = results
+    watchlist = watchlist or []
+    signal_rows = buy_recommendations + watchlist
+    under_30 = [r for r in signal_rows if r["price"] < 30][:UNDER_30_N]
     earnings = sorted(
-        [r for r in results if r.get("days_to_earnings") is not None and 0 <= r["days_to_earnings"] <= 21],
+        [r for r in signal_rows if r.get("days_to_earnings") is not None and 0 <= r["days_to_earnings"] <= 21],
         key=lambda x: x["earnings_score"],
         reverse=True,
     )[:EARNINGS_N]
 
     catalyst_watch = sorted(
-        [r for r in results if r.get("has_catalyst") or r.get("news_catalyst", 0) >= 30],
-        key=lambda x: x["catalyst_watch_score"],
+        [
+            r for r in signal_rows
+            if r.get("has_catalyst")
+            or abs(float(r.get("news_catalyst", 0) or 0)) >= 30
+            or r.get("catalyst_polarity") in {"POSITIVE", "NEGATIVE"}
+        ],
+        key=lambda x: (abs(safe_float(x.get("news_catalyst"), 0.0)), safe_float(x.get("catalyst_watch_score"), 0.0)),
         reverse=True,
     )[:CATALYST_N]
-    swing_watch = swing_recommendations(results)
+    swing_watch = swing_recommendations(signal_rows)
     short_swing_watch = short_swing_recommendations(bear_cases or [])
 
     political_watch = sorted(
-        [r for r in results if r.get("political_geo", 0) >= 20 or r.get("politician_trade", 0) >= 10],
+        [r for r in signal_rows if r.get("political_geo", 0) >= 20 or r.get("politician_trade", 0) >= 10],
         key=lambda x: x["catalyst_watch_score"],
         reverse=True,
     )[:POLITICAL_N]
@@ -1178,7 +1358,8 @@ def build_email(
       {html_bear_cases(bear_cases or [])}
       {html_historical_downside_alerts(historical_bear_alerts or [])}
       {html_universe_summary(universe_summary)}
-      {html_top10_table(top_10)}
+      {html_top10_table(buy_recommendations)}
+      {html_watchlist_table(watchlist)}
       {html_table("Top 5 Under $30", under_30)}
       {html_table("Top 5 Earnings Setups", earnings, reason_mode="earnings")}
       {html_table("Catalyst Watch", catalyst_watch, reason_mode="catalyst")}
@@ -1238,17 +1419,32 @@ def build_email(
     else:
         text += "No previous recommendations currently have strong downside signals.\n"
 
-    text += "\nRecommendations\n"
-    if not top_10:
-        text += "No high-confidence recommendations today.\n"
-    for r in top_10:
+    text += "\nBuy Recommendations\n"
+    if not buy_recommendations:
+        text += "No high-confidence buy recommendations today.\n"
+    for r in buy_recommendations:
         text += (
             f"{r['ticker']} | Score {r.get('score', 0):.0f} | Confidence {r.get('recommendation_confidence', 0):.0f} | "
             f"Swing {r.get('swing_setup', 0):.0f} | "
             f"Catalyst {r.get('catalyst_score', 0):.0f} | Quality {r.get('quality_score', 0):.0f}\n"
+            f"Signals: Opening {safe_float(r.get('opening_activity'), 0):.0f}, Trend {safe_float(r.get('trend'), 0):.0f}, "
+            f"Options {safe_float(r.get('options_flow'), 0):.0f}, News {safe_float(r.get('news_sentiment'), 50):.0f} {r.get('sentiment_polarity', 'NEUTRAL')}, "
+            f"Earnings {safe_float(r.get('earnings_quality', r.get('earnings')), 50):.0f}, R/R {swing_recommendation_risk_reward(r):.2f}\n"
             f"Drivers: {', '.join(r.get('top_drivers', top_drivers(r))[:3])}\n"
             f"Risks: {', '.join(r.get('top_risks', top_risks(r))[:2])}\n"
             f"Freshness: {str(r.get('data_freshness', ''))[:19]} | Missing data: {r.get('missing_data_warning') or 'none'}\n"
+        )
+
+    text += "\nWatchlist\n"
+    if not watchlist:
+        text += "No separate watchlist names today.\n"
+    for r in watchlist:
+        text += (
+            f"{r['ticker']} | Score {r.get('score', 0):.0f} | Confidence {r.get('recommendation_confidence', 0):.0f}\n"
+            f"Signals: Opening {safe_float(r.get('opening_activity'), 0):.0f}, Trend {safe_float(r.get('trend'), 0):.0f}, "
+            f"Options {safe_float(r.get('options_flow'), 0):.0f}, News {safe_float(r.get('news_sentiment'), 50):.0f} {r.get('sentiment_polarity', 'NEUTRAL')}, "
+            f"Catalyst {r.get('catalyst_polarity', 'NONE')}, R/R {swing_recommendation_risk_reward(r):.2f}\n"
+            f"Reason: {r.get('watchlist_reason', 'watch only')}\n"
         )
 
     sections = [
@@ -1293,14 +1489,14 @@ def build_email(
                     f"Setup: {r.get('setup_type', '')}\n"
                 )
 
-    tracked_recommendations = top_10 + short_swing_tracking_rows(short_swing_watch)
+    tracked_recommendations = buy_recommendations + short_swing_tracking_rows(short_swing_watch)
     return html, text, tracked_recommendations
 
 
 def main():
     learned_weights = refresh_learning_state()
     log_event("learned_weights", weights=learned_weights)
-    results, spy_df, qqq_df, regime, sector_extremes, reddit_plays, universe_summary, bear_cases = analyze_universe(learned_weights)
+    results, spy_df, qqq_df, regime, sector_extremes, reddit_plays, universe_summary, bear_cases, watchlist = analyze_universe(learned_weights)
     previous_downside_alerts = historical_downside_alerts()
     html, text, tracked_recommendations = build_email(
         results,
@@ -1312,6 +1508,7 @@ def main():
         universe_summary,
         bear_cases,
         previous_downside_alerts,
+        watchlist,
     )
 
     print(text)

@@ -2,12 +2,12 @@ name: V4 Stock Bot
 
 on:
   schedule:
-    # Daily 7:05 AM Pacific (14:05 UTC during PDT, 15:05 UTC during PST).
-    - cron: "5 14 * * *"
-    - cron: "5 15 * * *"
-    # Sunday 8:00 PM Pacific (Mon 03:00 UTC during PDT, Mon 04:00 UTC during PST).
-    - cron: "0 3 * * 1"
-    - cron: "0 4 * * 1"
+    # Weekdays 6:30 AM Pacific (13:30 UTC during PDT, 14:30 UTC during PST).
+    - cron: "30 13 * * 1-5"
+    - cron: "30 14 * * 1-5"
+    # Sunday 10:00 PM Pacific (Mon 05:00 UTC during PDT, Mon 06:00 UTC during PST).
+    - cron: "0 5 * * 1"
+    - cron: "0 6 * * 1"
   workflow_dispatch:
 
 jobs:
@@ -38,9 +38,9 @@ jobs:
           hour=$(TZ=America/Los_Angeles date +%H)
           minute=$(TZ=America/Los_Angeles date +%M)
           day=$(TZ=America/Los_Angeles date +%u)
-          # Run every day at 7:05 AM Pacific, plus Sunday at 8:00 PM Pacific.
-          if { [ "$hour" = "07" ] && [ "$minute" = "05" ]; } || \
-             { [ "$day" = "7" ] && [ "$hour" = "20" ] && [ "$minute" = "00" ]; }; then
+          # Run weekdays at 6:30 AM Pacific, plus Sunday at 10:00 PM Pacific.
+          if { [ "$day" -ge 1 ] && [ "$day" -le 5 ] && [ "$hour" = "06" ] && [ "$minute" = "30" ]; } || \
+             { [ "$day" = "7" ] && [ "$hour" = "22" ] && [ "$minute" = "00" ]; }; then
             echo "run_bot=true" >> "$GITHUB_OUTPUT"
           else
             echo "run_bot=false" >> "$GITHUB_OUTPUT"
@@ -55,6 +55,15 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
+          GEMINI_TIMEOUT_SECONDS: ${{ secrets.GEMINI_TIMEOUT_SECONDS }}
+          GEMINI_MAX_ATTEMPTS: ${{ secrets.GEMINI_MAX_ATTEMPTS }}
+          GEMINI_MAX_CALLS_PER_RUN: ${{ secrets.GEMINI_MAX_CALLS_PER_RUN }}
+          GEMINI_REQUESTS_PER_MINUTE: ${{ secrets.GEMINI_REQUESTS_PER_MINUTE }}
+          GEMINI_MAX_CANDIDATES_PER_CALL: ${{ secrets.GEMINI_MAX_CANDIDATES_PER_CALL }}
+          GEMINI_MAX_CANDIDATES_PER_RUN: ${{ secrets.GEMINI_MAX_CANDIDATES_PER_RUN }}
+          GEMINI_HEADLINES_PER_TICKER: ${{ secrets.GEMINI_HEADLINES_PER_TICKER }}
+          GEMINI_MAX_HEADLINE_CHARS: ${{ secrets.GEMINI_MAX_HEADLINE_CHARS }}
+          GEMINI_BATCH_SIZE: ${{ secrets.GEMINI_BATCH_SIZE }}
           GEMINI_REDDIT_BATCH_SIZE: ${{ secrets.GEMINI_REDDIT_BATCH_SIZE }}
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
@@ -74,6 +83,7 @@ jobs:
           MIN_PRICE: ${{ secrets.MIN_PRICE }}
           MIN_MARKET_CAP: ${{ secrets.MIN_MARKET_CAP }}
           MIN_RECOMMENDATION_CONFIDENCE: ${{ secrets.MIN_RECOMMENDATION_CONFIDENCE }}
+          MIN_RECOMMENDATION_SCORE: ${{ secrets.MIN_RECOMMENDATION_SCORE }}
           MAX_RECOMMENDATIONS: ${{ secrets.MAX_RECOMMENDATIONS }}
           LEARNING_EVAL_HORIZON_DAYS: ${{ secrets.LEARNING_EVAL_HORIZON_DAYS }}
           LEARNING_REWARD_ALPHA_SCALE: ${{ secrets.LEARNING_REWARD_ALPHA_SCALE }}

@@ -9,22 +9,56 @@ import requests
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "gemini-2.5-flash"
-TIMEOUT_SECONDS = int(os.getenv("GEMINI_TIMEOUT_SECONDS", "120"))
-MAX_ATTEMPTS = int(os.getenv("GEMINI_MAX_ATTEMPTS", "2"))
-BATCH_SIZE = int(os.getenv("GEMINI_BATCH_SIZE", "5"))
-REDDIT_BATCH_SIZE = int(os.getenv("GEMINI_REDDIT_BATCH_SIZE") or "5")
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or str(raw).strip() == "":
+        return int(default)
+    try:
+        return int(float(raw))
+    except (TypeError, ValueError):
+        logger.warning(json.dumps({"event": "gemini_invalid_int_env", "name": name, "value": raw, "default": default}))
+        return int(default)
+
+
+TIMEOUT_SECONDS = _env_int("GEMINI_TIMEOUT_SECONDS", 120)
+MAX_ATTEMPTS = _env_int("GEMINI_MAX_ATTEMPTS", 1)
+MAX_CALLS_PER_RUN = _env_int("GEMINI_MAX_CALLS_PER_RUN", 20)
+REQUESTS_PER_MINUTE = max(1, _env_int("GEMINI_REQUESTS_PER_MINUTE", 5))
+MAX_CANDIDATES_PER_CALL = _env_int("GEMINI_MAX_CANDIDATES_PER_CALL", 20)
+MAX_CANDIDATES_PER_RUN = _env_int("GEMINI_MAX_CANDIDATES_PER_RUN", MAX_CALLS_PER_RUN * MAX_CANDIDATES_PER_CALL)
+HEADLINES_PER_TICKER = _env_int("GEMINI_HEADLINES_PER_TICKER", 8)
+MAX_HEADLINE_CHARS = _env_int("GEMINI_MAX_HEADLINE_CHARS", 220)
+BATCH_SIZE = _env_int("GEMINI_BATCH_SIZE", MAX_CANDIDATES_PER_CALL)
+REDDIT_BATCH_SIZE = _env_int("GEMINI_REDDIT_BATCH_SIZE", MAX_CANDIDATES_PER_CALL)
 LOG_SNIPPET_CHARS = 1200
+_GEMINI_CALLS_MADE = 0
+_GEMINI_LAST_CALL_TS = 0.0
+
+
+def gemini_usage_summary() -> dict[str, Any]:
+    return {
+        "calls_made": _GEMINI_CALLS_MADE,
+        "max_calls_per_run": MAX_CALLS_PER_RUN,
+        "requests_per_minute": REQUESTS_PER_MINUTE,
+        "max_candidates_per_call": MAX_CANDIDATES_PER_CALL,
+        "max_candidates_per_run": MAX_CANDIDATES_PER_RUN,
+        "headlines_per_ticker": HEADLINES_PER_TICKER,
+    }
 
 
 def _default_result(reason: str) -> dict[str, Any]:
-    return {"sentiment": 50.0, "confidence": 0.0, "reasoning": reason}
+    return {"sentiment": 50.0, "confidence": 0.0, "reasoning": reason, "polarity": "NEUTRAL"}
 
 
 def _normalize_result(raw: dict[str, Any]) -> dict[str, Any]:
+    sentiment = max(0.0, min(100.0, float(raw.get("sentiment", 50.0))))
     return {
-        "sentiment": max(0.0, min(100.0, float(raw.get("sentiment", 50.0)))),
+        "sentiment": sentiment,
         "confidence": max(0.0, min(1.0, float(raw.get("confidence", 0.0)))),
         "reasoning": str(raw.get("reasoning", "")).strip()[:700],
+        "polarity": _sentiment_polarity(sentiment),
     }
 
 
@@ -37,11 +71,18 @@ def score_overnight_sentiments(candidates: list[dict[str, Any]]) -> dict[str, di
     scored_candidates = [
         {
             "ticker": str(candidate["ticker"]).upper(),
-            "overnight_headlines": candidate.get("headlines", [])[:15],
+            "overnight_headlines": _compact_headlines(candidate.get("headlines", [])),
         }
         for candidate in candidates
         if candidate.get("ticker") and candidate.get("headlines")
     ]
+    if len(scored_candidates) > MAX_CANDIDATES_PER_RUN:
+        _log_event(
+            "gemini_sentiment_candidates_truncated",
+            original_count=len(scored_candidates),
+            kept_count=MAX_CANDIDATES_PER_RUN,
+        )
+        scored_candidates = scored_candidates[:MAX_CANDIDATES_PER_RUN]
     if not scored_candidates:
         _log_event("gemini_sentiment_skipped", reason="no candidates with headlines", candidate_count=len(defaults))
         return defaults
@@ -56,9 +97,11 @@ def score_overnight_sentiments(candidates: list[dict[str, Any]]) -> dict[str, di
 
     model = os.getenv("GEMINI_MODEL") or DEFAULT_MODEL
     results = dict(defaults)
-    for batch_index, batch in enumerate(_chunks(scored_candidates, BATCH_SIZE), start=1):
+    for batch_index, batch in enumerate(_chunks(scored_candidates, min(BATCH_SIZE, MAX_CANDIDATES_PER_CALL)), start=1):
         batch_results = _score_batch(batch, results, model, api_key, batch_index)
         results.update(batch_results)
+        if _GEMINI_CALLS_MADE >= MAX_CALLS_PER_RUN:
+            break
     return results
 
 
@@ -118,6 +161,11 @@ def _score_batch(
     last_error = "Gemini sentiment request failed; sentiment score neutral."
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
+            if not _reserve_gemini_call("sentiment", model, batch_index, attempt, len(scored_candidates)):
+                return {
+                    candidate["ticker"]: _default_result("Gemini call budget reached; sentiment score neutral.")
+                    for candidate in scored_candidates
+                }
             _log_event(
                 "gemini_sentiment_request",
                 model=model,
@@ -256,6 +304,8 @@ def analyze_reddit_plays(candidates: list[dict[str, Any]], limit: int = 10) -> l
     for batch_index, batch in enumerate(_chunks(candidates, REDDIT_BATCH_SIZE), start=1):
         batch_results = _analyze_reddit_batch(batch, model, api_key, batch_index)
         results.update(batch_results)
+        if _GEMINI_CALLS_MADE >= MAX_CALLS_PER_RUN:
+            break
 
     output = []
     for candidate in candidates:
@@ -321,6 +371,14 @@ def _analyze_reddit_batch(
     last_error = "Gemini Reddit analysis failed; using fallback Reddit score."
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
+            if not _reserve_gemini_call("reddit", model, batch_index, attempt, len(candidates)):
+                return {
+                    str(candidate.get("ticker", "")).upper(): _fallback_reddit_result(
+                        candidate, "Gemini call budget reached; using fallback Reddit score."
+                    )
+                    for candidate in candidates
+                    if candidate.get("ticker")
+                }
             _log_event(
                 "gemini_reddit_request",
                 model=model,
@@ -472,6 +530,66 @@ def _response_text(payload: dict[str, Any]) -> str:
     if not parts or "text" not in parts[0]:
         raise ValueError("Gemini response contained no text part")
     return parts[0]["text"]
+
+
+def _compact_headlines(headlines: list[str]) -> list[str]:
+    compact = []
+    for headline in headlines[:HEADLINES_PER_TICKER]:
+        text = str(headline).strip()
+        if text:
+            compact.append(text[:MAX_HEADLINE_CHARS])
+    return compact
+
+
+def _sentiment_polarity(sentiment: float) -> str:
+    if sentiment >= 60:
+        return "POSITIVE"
+    if sentiment <= 40:
+        return "NEGATIVE"
+    return "NEUTRAL"
+
+
+def _reserve_gemini_call(kind: str, model: str, batch_index: int, attempt: int, candidate_count: int) -> bool:
+    global _GEMINI_CALLS_MADE, _GEMINI_LAST_CALL_TS
+    if _GEMINI_CALLS_MADE >= MAX_CALLS_PER_RUN:
+        _log_event(
+            "gemini_call_budget_exhausted",
+            kind=kind,
+            model=model,
+            batch_index=batch_index,
+            attempt=attempt,
+            calls_made=_GEMINI_CALLS_MADE,
+            max_calls_per_run=MAX_CALLS_PER_RUN,
+            candidate_count=candidate_count,
+        )
+        return False
+
+    now = time.monotonic()
+    min_interval = 60.0 / REQUESTS_PER_MINUTE
+    if _GEMINI_CALLS_MADE > 0 and now - _GEMINI_LAST_CALL_TS < min_interval:
+        sleep_seconds = min_interval - (now - _GEMINI_LAST_CALL_TS)
+        _log_event(
+            "gemini_rate_limit_sleep",
+            kind=kind,
+            sleep_seconds=round(sleep_seconds, 2),
+            requests_per_minute=REQUESTS_PER_MINUTE,
+        )
+        time.sleep(sleep_seconds)
+
+    _GEMINI_CALLS_MADE += 1
+    _GEMINI_LAST_CALL_TS = time.monotonic()
+    _log_event(
+        "gemini_call_reserved",
+        kind=kind,
+        model=model,
+        batch_index=batch_index,
+        attempt=attempt,
+        calls_made=_GEMINI_CALLS_MADE,
+        max_calls_per_run=MAX_CALLS_PER_RUN,
+        requests_per_minute=REQUESTS_PER_MINUTE,
+        candidate_count=candidate_count,
+    )
+    return True
 
 
 def _safe_snippet(value: str | None) -> str:

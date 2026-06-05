@@ -11,17 +11,21 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 import learning
+import gemini_sentiment
 from analyst_revisions import analyst_revision_score
 from insider_buying import insider_buying_score
 from fmp_client import FMPClient
 from main_v4 import (
+    apply_bearish_news_caps,
     high_quality_long_candidate,
     quality_liquidity_filter,
     recommendation_confidence,
     short_swing_recommendations,
     swing_recommendations,
+    watchlist_candidates,
 )
 from market_breadth import market_breadth_regime
+from news_catalyst import catalyst_details
 from opening_activity import _session_activity_score
 from scoring import apply_reddit_blend, regime_adjusted_weights
 from reddit_client import _fetch_subreddit_listing
@@ -288,11 +292,63 @@ class V42SignalTests(unittest.TestCase):
         bearish = {**strong, "ticker": "BAD", "bear_case_details": {"score": 82}}
         low_quality = {**strong, "ticker": "LOWQ", "quality_score": 52}
         no_plan = {**strong, "ticker": "NOPLAN", "swing_details": {"risk_reward": 0.4}, "options_flow": 60, "news_sentiment": 55, "catalyst_score": 55}
+        negative_news = {**strong, "ticker": "NEG", "catalyst_polarity": "NEGATIVE"}
 
         self.assertTrue(high_quality_long_candidate(strong, 68))
         self.assertFalse(high_quality_long_candidate(bearish, 68))
         self.assertFalse(high_quality_long_candidate(low_quality, 68))
         self.assertFalse(high_quality_long_candidate(no_plan, 68))
+        self.assertFalse(high_quality_long_candidate(negative_news, 68))
+
+    def test_catalyst_details_classifies_positive_and_negative_news(self):
+        positive = catalyst_details("TEST", ["TEST wins AI contract and raises guidance after strong demand"])
+        negative = catalyst_details("TEST", ["TEST downgraded after weak guidance warning and investigation"])
+
+        self.assertEqual(positive["polarity"], "POSITIVE")
+        self.assertGreater(positive["score"], 0)
+        self.assertEqual(negative["polarity"], "NEGATIVE")
+        self.assertLess(negative["score"], 0)
+
+    def test_bearish_news_caps_score_and_confidence(self):
+        row = {
+            "score": 82.0,
+            "news_sentiment": 24.0,
+            "sentiment_confidence": 0.8,
+            "catalyst_polarity": "NEGATIVE",
+        }
+        apply_bearish_news_caps(row)
+
+        self.assertLessEqual(row["score"], 45.0)
+        self.assertLessEqual(row["recommendation_confidence_cap"], 50.0)
+        self.assertIn("bearish", row["score_cap_reason"])
+        self.assertIn("negative catalyst", row["score_cap_reason"])
+
+    def test_watchlist_keeps_interesting_non_buy_rows(self):
+        buy = {"ticker": "BUY", "score": 82, "recommendation_confidence": 80}
+        watch = {
+            "ticker": "WATCH",
+            "score": 58,
+            "recommendation_confidence": 61,
+            "swing_setup": 72,
+            "pattern_trading": 70,
+            "trend": 68,
+            "options_flow": 64,
+            "news_sentiment": 66,
+            "catalyst_score": 60,
+            "bear_case_details": {"score": 0},
+            "swing_details": {"risk_reward": 0.8},
+        }
+        selected = watchlist_candidates([buy, watch], [buy], {"WATCH": "confidence below threshold"})
+
+        self.assertEqual([row["ticker"] for row in selected], ["WATCH"])
+        self.assertIn("confidence below threshold", selected[0]["watchlist_reason"])
+
+    def test_gemini_defaults_use_flash_and_maximize_workflow_batches(self):
+        self.assertEqual(gemini_sentiment.DEFAULT_MODEL, "gemini-2.5-flash")
+        self.assertEqual(gemini_sentiment.TIMEOUT_SECONDS, 120)
+        self.assertEqual(gemini_sentiment.MAX_CALLS_PER_RUN, 20)
+        self.assertEqual(gemini_sentiment.REQUESTS_PER_MINUTE, 5)
+        self.assertEqual(gemini_sentiment.MAX_CANDIDATES_PER_CALL, 20)
 
     def test_short_swing_recommendations_require_bear_score_and_rr(self):
         rows = [

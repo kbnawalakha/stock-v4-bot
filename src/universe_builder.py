@@ -150,6 +150,7 @@ def update_universe_stages(
     stage2: list[str] | None = None,
     stage3: list[str] | None = None,
     final_top_10: list[str] | None = None,
+    final_recommendations: list[str] | None = None,
 ) -> dict[str, Any]:
     if stage2 is not None:
         summary["stage2_opportunity_candidates"] = stage2
@@ -157,6 +158,10 @@ def update_universe_stages(
         summary["stage3_deep_analysis_candidates"] = stage3
     if final_top_10 is not None:
         summary["final_top_10"] = final_top_10
+        summary["final_recommendations"] = final_top_10
+    if final_recommendations is not None:
+        summary["final_recommendations"] = final_recommendations
+        summary["final_top_10"] = final_recommendations
     return summary
 
 
@@ -193,6 +198,7 @@ def _empty_summary() -> dict[str, Any]:
         "stage2_opportunity_candidates": [],
         "stage3_deep_analysis_candidates": [],
         "final_top_10": [],
+        "final_recommendations": [],
         "sources_used": {},
         "removed": {
             "duplicates": 0,

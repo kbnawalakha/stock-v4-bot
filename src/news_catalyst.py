@@ -35,10 +35,18 @@ def get_recent_headlines(ticker: str, limit: int = 8) -> list[str]:
         return []
 
 
-def news_catalyst_score(ticker: str) -> tuple[float, list[str], bool]:
-    headlines = get_recent_headlines(ticker)
+def catalyst_details(ticker: str, headlines: list[str] | None = None) -> dict:
+    headlines = headlines if headlines is not None else get_recent_headlines(ticker)
     if not headlines:
-        return 0.0, [], False
+        return {
+            "score": 0.0,
+            "catalysts": [],
+            "has_catalyst": False,
+            "polarity": "NONE",
+            "positive_hits": 0,
+            "negative_hits": 0,
+            "catalyst_hits": 0,
+        }
 
     joined = " ".join(headlines).lower()
     pos = sum(1 for w in POSITIVE_WORDS if re.search(r"\b" + re.escape(w) + r"\b", joined))
@@ -51,9 +59,30 @@ def news_catalyst_score(ticker: str) -> tuple[float, list[str], bool]:
     catalysts = []
     for h in headlines:
         hl = h.lower()
-        if any(w in hl for w in POSITIVE_WORDS + CATALYST_WORDS):
+        if any(w in hl for w in POSITIVE_WORDS + NEGATIVE_WORDS + CATALYST_WORDS):
             catalysts.append(h)
         if len(catalysts) >= 2:
             break
 
-    return float(score), catalysts, catalyst_hits > 0
+    polarity = "MIXED"
+    if pos > neg:
+        polarity = "POSITIVE"
+    elif neg > pos:
+        polarity = "NEGATIVE"
+    elif catalyst_hits == 0:
+        polarity = "NONE"
+
+    return {
+        "score": float(score),
+        "catalysts": catalysts,
+        "has_catalyst": catalyst_hits > 0,
+        "polarity": polarity,
+        "positive_hits": pos,
+        "negative_hits": neg,
+        "catalyst_hits": catalyst_hits,
+    }
+
+
+def news_catalyst_score(ticker: str) -> tuple[float, list[str], bool]:
+    details = catalyst_details(ticker)
+    return float(details["score"]), list(details["catalysts"]), bool(details["has_catalyst"])
