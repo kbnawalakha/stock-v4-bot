@@ -771,40 +771,32 @@
     }
   ],
   "last_evaluation_summary": {
-    "avg_alpha_return_pct": -1.0307921840842955,
-    "best": {
-      "alpha_return_pct": 4.95571313254306,
-      "ticker": "GS"
-    },
-    "evaluated_new": 15,
-    "win_rate": 0.5333333333333333,
-    "worst": {
-      "alpha_return_pct": -12.586859324621802,
-      "ticker": "AVGO"
-    }
+    "avg_alpha_return_pct": 0.0,
+    "evaluated_new": 0,
+    "win_rate": 0.0
   },
-  "last_updated": "2026-06-05T00:56:57.454117+00:00",
+  "last_updated": "2026-06-05T04:28:33.520107+00:00",
   "learned_weights": {
-    "analyst_revisions": 0.07214112803914102,
-    "earnings_quality": 0.05766413727336012,
-    "fundamental_momentum": 0.07171092497596289,
-    "insider_buying": 0.05047884691355175,
-    "institutional_ownership": 0.035942649298580494,
-    "news_sentiment": 0.09530958978425495,
-    "opening_activity": 0.08697283106237844,
-    "options_flow": 0.05709342321493916,
-    "pattern_trading": 0.03573600773442265,
-    "political_geo": 0.007310807278421262,
-    "politician_trade": 0.007313154709760508,
-    "post_market_activity": 0.021841976346698506,
-    "pre_market_activity": 0.028896852647843405,
-    "relative_strength": 0.056892440617025586,
-    "sector_strength": 0.04252377913415973,
-    "short_squeeze": 0.028850330439125667,
-    "swing_setup": 0.0715938541100752,
-    "trend": 0.07115070898067698,
-    "volatility_setup": 0.0434507248428916,
-    "volume_accumulation": 0.0571258325967302
+    "analyst_revisions": 0.0627687840759357,
+    "earnings_quality": 0.047036810170972054,
+    "fundamental_momentum": 0.06239447161485547,
+    "insider_buying": 0.03921499735064736,
+    "institutional_ownership": 0.031273095587244205,
+    "news_sentiment": 0.07973776306118771,
+    "opening_activity": 0.04729599988429384,
+    "options_flow": 0.046571276997370695,
+    "pattern_trading": 0.05441327540652829,
+    "political_geo": 0.007951263307648634,
+    "politician_trade": 0.007953816383384889,
+    "post_market_activity": 0.015836947364636023,
+    "pre_market_activity": 0.0157141663987991,
+    "relative_strength": 0.07734555814649054,
+    "sector_strength": 0.04624903267933141,
+    "short_squeeze": 0.023533301292654473,
+    "swing_setup": 0.12458522044072155,
+    "trend": 0.09286055562718841,
+    "volatility_setup": 0.05513337964003874,
+    "volume_accumulation": 0.062130284570070984
   },
   "signal_scores": {
     "analyst_revisions": -0.03869422774130533,
