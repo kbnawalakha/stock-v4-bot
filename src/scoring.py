@@ -7,9 +7,13 @@ def regime_adjusted_weights(regime: str | None, base_weights: dict[str, float] |
     if regime == "RISK_ON":
         weights["trend"] *= 1.25
         weights["options_flow"] *= 1.25
+        weights["swing_setup"] *= 1.15
     elif regime == "RISK_OFF":
         weights["news_sentiment"] *= 1.25
         weights["opening_activity"] *= 1.25
+        # In a weak tape, lean harder on trend quality and relative strength.
+        weights["relative_strength"] *= 1.20
+        weights["trend"] *= 1.10
 
     total = sum(weights.values())
     if total <= 0:
@@ -37,9 +41,12 @@ def opportunity_score(row: dict, weights: dict[str, float] | None = None) -> flo
         (row.get("pre_market_activity", 50.0), weights.get("pre_market_activity", 0.04)),
         (row.get("post_market_activity", 50.0), weights.get("post_market_activity", 0.03)),
         (row.get("volume_accumulation", 50.0), weights.get("volume_accumulation", 0.08)),
-        (row.get("volatility_setup", 50.0), weights.get("volatility_setup", 0.06)),
-        (row.get("swing_setup", 50.0), weights.get("swing_setup", 0.10)),
-        (row.get("options_flow", 50.0), weights.get("options_flow", 0.08)),
+        (row.get("volatility_setup", 50.0), weights.get("volatility_setup", 0.07)),
+        (row.get("swing_setup", 50.0), weights.get("swing_setup", 0.16)),
+        # Reward concrete, favorable risk/reward on the swing setup itself.
+        (row.get("swing_risk_reward", 50.0), 0.06),
+        (row.get("pattern_trading", 50.0), weights.get("pattern_trading", 0.07)),
+        (row.get("options_flow", 50.0), weights.get("options_flow", 0.06)),
         (row.get("etf_flow_exposure", 50.0), 0.02),
     ])
 
@@ -96,7 +103,10 @@ def staged_final_score(
     row["catalyst_score"] = cat
     row["quality_score"] = qual
     row["regime_adjustment_score"] = reg
-    score = opp * 0.35 + cat * 0.35 + qual * 0.20 + reg * 0.10
+    # Swing-tilted blend: the technical/opportunity bucket leads, catalyst supports.
+    # (Previously 0.35/0.35/0.20/0.10, which let neutral catalyst readings dominate
+    # the early funnel where catalyst/quality are still at their default of 50.)
+    score = opp * 0.45 + cat * 0.25 + qual * 0.20 + reg * 0.10
     return clamp(score, 0, 100)
 
 

@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 
+from swing_indicators import swing_confirmation_score, directional_bias, adx
+
 
 def _clamp(value: float, low: float = 0.0, high: float = 100.0) -> float:
     return float(np.clip(value, low, high))
@@ -30,18 +32,33 @@ def swing_trading_score(df: pd.DataFrame) -> dict[str, float | str | int]:
     setup, setup_type = _setup_component(df, price, high, low, volume, ma10, ma20, ma50)
     risk = _risk_component(price, ma20.iloc[-1], rsi.iloc[-1], atr.iloc[-1])
     rr_details = _risk_reward(price, high, low, atr.iloc[-1])
+    confirmation = swing_confirmation_score(df)  # ADX trend quality + MACD + Bollinger squeeze
 
     score = _clamp(
-        trend * 0.25
-        + momentum * 0.20
-        + setup * 0.25
-        + risk * 0.15
-        + rr_details["risk_reward_score"] * 0.15
+        trend * 0.22
+        + momentum * 0.16
+        + setup * 0.22
+        + risk * 0.12
+        + rr_details["risk_reward_score"] * 0.12
+        + confirmation["composite"] * 0.16
     )
+
+    # Hard gate: do not flag a strong swing-long into a confirmed downtrend.
+    adx_val = float(adx(df).iloc[-1])
+    bias = directional_bias(df)
+    downtrend_gated = bias < 0 and adx_val >= 22
+    if downtrend_gated:
+        score = _clamp(min(score, 45.0))
 
     reasons = []
     if trend >= 70:
         reasons.append("trend structure supports a multi-day hold")
+    if confirmation["adx"] >= 70:
+        reasons.append("trend strength (ADX) confirms the move")
+    if confirmation["macd"] >= 68:
+        reasons.append("MACD momentum is expanding")
+    if confirmation["bollinger"] >= 70:
+        reasons.append("volatility has coiled for a potential expansion")
     if momentum >= 70:
         reasons.append("short-term momentum is improving")
     if setup >= 70:
@@ -50,6 +67,8 @@ def swing_trading_score(df: pd.DataFrame) -> dict[str, float | str | int]:
         reasons.append("risk is elevated from volatility or overextension")
     if rr_details["risk_reward"] >= 1.8:
         reasons.append("risk/reward is favorable")
+    if downtrend_gated:
+        reasons.insert(0, "capped: price is in a confirmed downtrend")
     if not reasons:
         reasons.append("swing setup is neutral")
 
@@ -62,6 +81,11 @@ def swing_trading_score(df: pd.DataFrame) -> dict[str, float | str | int]:
         "risk_reward": round(rr_details["risk_reward"], 2),
         "atr_pct": round(float(atr.iloc[-1] / price * 100), 2) if atr.iloc[-1] > 0 else 0.0,
         "holding_period_days": 3 if setup_type.startswith("breakout") else 7,
+        "adx": confirmation["adx"],
+        "macd": confirmation["macd"],
+        "bollinger": confirmation["bollinger"],
+        "confirmation": confirmation["composite"],
+        "directional_bias": bias,
         "reason": "; ".join(reasons[:3]) + ".",
     }
 
@@ -358,5 +382,10 @@ def _empty(reason: str) -> dict[str, float | str | int]:
         "risk_reward": 0.0,
         "atr_pct": 0.0,
         "holding_period_days": 0,
+        "adx": 50.0,
+        "macd": 50.0,
+        "bollinger": 50.0,
+        "confirmation": 50.0,
+        "directional_bias": 0,
         "reason": reason,
     }

@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -15,10 +16,19 @@ PREDICTIONS_FILE = Path("predictions.csv")
 STATE_FILE = Path("learning_state.json")
 OUTCOMES_FILE = Path("recommendation_outcomes.csv")
 MIN_EVALUATION_DAYS = 1
+# Swing evaluation horizon (trading days). Picks are graded on their forward return
+# over this fixed window rather than on "price as of today", so a 2-day-old pick and a
+# 40-day-old pick are scored on the same, swing-relevant timescale.
+EVAL_HORIZON_DAYS = int(float(os.getenv("LEARNING_EVAL_HORIZON_DAYS", "5") or 5))
+# Alpha (vs SPY, over the horizon) that counts as a full +/-1 reward.
+REWARD_ALPHA_SCALE = float(os.getenv("LEARNING_REWARD_ALPHA_SCALE", "5.0") or 5.0)
 SIGNAL_DECAY = 0.90
 LEARNING_RATE = 0.35
 MIN_WEIGHT_MULTIPLIER = 0.50
 MAX_WEIGHT_MULTIPLIER = 1.50
+# Signals stored on a signed -100..100 scale (neutral = 0). Everything else is on a
+# 0..100 scale (neutral = 50). This distinction is essential for correct attribution.
+SIGNED_SIGNALS = {"relative_strength", "sector_strength", "political_geo", "politician_trade"}
 MAX_EVALUATED_KEYS = 5000
 MAX_EVALUATION_HISTORY = 1000
 MAX_OUTCOME_ROWS = 5000
@@ -105,13 +115,13 @@ def refresh_learning_state() -> dict[str, float]:
         if not entry_price or entry_price <= 0:
             continue
 
-        ticker_return, latest_price = _return_since(ticker, entry_price)
+        ticker_return, latest_price = _return_since(ticker, entry_price, rec_date)
         spy_return = _benchmark_return_since(spy_df, rec_date)
         if ticker_return is None or spy_return is None:
             continue
 
         alpha = ticker_return - spy_return
-        reward = max(-1.0, min(1.0, alpha / 10.0))
+        reward = max(-1.0, min(1.0, alpha / REWARD_ALPHA_SCALE))
         _update_signal_scores(state, row, reward)
         outcome_records.append(_outcome_record(key, row, rec_date, ticker, entry_price, latest_price, ticker_return, spy_return, alpha, reward))
         evaluated.add(key)
@@ -211,13 +221,23 @@ def _update_signal_scores(state: dict, row: pd.Series, reward: float) -> None:
     for key in STRATEGY_WEIGHTS:
         if key not in row or pd.isna(row.get(key)):
             continue
-        exposure = _safe_float(row.get(key)) or 0.0
-        exposure = max(0.0, min(1.0, exposure / 100.0))
-        if exposure <= 0:
+        # Center exposure around the signal's neutral value so a neutral reading gets
+        # ZERO credit (previously a 50/100 -> 0.5 exposure meant every neutral signal
+        # was half-credited for every outcome, which washed out real signal over time).
+        exposure = _exposure(key, _safe_float(row.get(key)))
+        if exposure is None or abs(exposure) < 0.10:
             scores[key] = SIGNAL_DECAY * float(scores.get(key, 0.0))
             continue
         contribution = reward * exposure
         scores[key] = SIGNAL_DECAY * float(scores.get(key, 0.0)) + (1 - SIGNAL_DECAY) * contribution
+
+
+def _exposure(key: str, raw: float | None) -> float | None:
+    if raw is None:
+        return None
+    if key in SIGNED_SIGNALS:
+        return max(-1.0, min(1.0, raw / 100.0))
+    return max(-1.0, min(1.0, (raw - 50.0) / 50.0))
 
 
 def _weights_from_signal_scores(signal_scores: dict[str, float]) -> dict[str, float]:
@@ -238,17 +258,31 @@ def _normalize_weights(weights: dict[str, float]) -> dict[str, float]:
     return {key: value / total for key, value in cleaned.items()}
 
 
-def _return_since(ticker: str, entry_price: float) -> tuple[float | None, float | None]:
-    df = get_history(ticker, period="2mo")
-    if df.empty:
+def _return_since(ticker: str, entry_price: float, rec_date=None, horizon: int = EVAL_HORIZON_DAYS) -> tuple[float | None, float | None]:
+    """Forward return measured `horizon` trading days after rec_date (capped at the
+    latest available bar). Falls back to latest close if rec_date is unknown."""
+    df = get_history(ticker, period="3mo")
+    if df.empty or "Close" not in df:
         return None, None
-    latest = _safe_float(df["Close"].iloc[-1])
-    if latest is None or latest <= 0:
+    close = df["Close"]
+    exit_price = None
+    if rec_date is not None:
+        try:
+            forward = close[close.index.date > rec_date]
+        except Exception:
+            forward = close
+        if not forward.empty:
+            pos = min(horizon - 1, len(forward) - 1)
+            exit_price = _safe_float(forward.iloc[pos])
+    if exit_price is None:
+        exit_price = _safe_float(close.iloc[-1])
+    if exit_price is None or exit_price <= 0:
         return None, None
-    return (latest / entry_price - 1) * 100, latest
+    return (exit_price / entry_price - 1) * 100, exit_price
 
 
-def _benchmark_return_since(spy_df: pd.DataFrame, rec_date) -> float | None:
+def _benchmark_return_since(spy_df: pd.DataFrame, rec_date, horizon: int = EVAL_HORIZON_DAYS) -> float | None:
+    """SPY forward return over the same fixed horizon, for a like-for-like comparison."""
     if spy_df.empty:
         return None
     close = spy_df["Close"]
@@ -256,10 +290,11 @@ def _benchmark_return_since(spy_df: pd.DataFrame, rec_date) -> float | None:
     if dated.empty:
         return None
     entry = _safe_float(dated.iloc[0])
-    latest = _safe_float(close.iloc[-1])
-    if not entry or not latest or entry <= 0:
+    pos = min(horizon, len(dated) - 1)
+    exit_price = _safe_float(dated.iloc[pos])
+    if not entry or not exit_price or entry <= 0:
         return None
-    return (latest / entry - 1) * 100
+    return (exit_price / entry - 1) * 100
 
 
 def _parse_date(value):

@@ -17,25 +17,30 @@ EARNINGS_N = 5
 CATALYST_N = 5
 POLITICAL_N = 5
 
+# Weights rebalanced for SWING trading (multi-day holds). Intraday signals
+# (opening/pre/post-market) are demoted because they say little about a 3-10 day
+# hold; trend quality, relative strength, the swing setup itself, chart patterns,
+# and volatility/volume structure are emphasized. Values are relative and get
+# normalized downstream, and the learning loop adapts them further over time.
 STRATEGY_WEIGHTS = {
-    "opening_activity": 0.12,
-    "pre_market_activity": 0.04,
-    "post_market_activity": 0.03,
-    "news_sentiment": 0.13,
-    "trend": 0.10,
-    "relative_strength": 0.08,
+    "opening_activity": 0.06,        # was 0.12 - intraday, weak for swing
+    "pre_market_activity": 0.02,     # was 0.04
+    "post_market_activity": 0.02,    # was 0.03
+    "news_sentiment": 0.10,          # was 0.13
+    "trend": 0.12,                   # was 0.10 - core to swing
+    "relative_strength": 0.10,       # was 0.08 - core to swing
     "sector_strength": 0.06,
-    "options_flow": 0.08,
-    "earnings_quality": 0.08,
-    "analyst_revisions": 0.10,
-    "fundamental_momentum": 0.10,
+    "options_flow": 0.06,            # was 0.08
+    "earnings_quality": 0.06,        # was 0.08
+    "analyst_revisions": 0.08,       # was 0.10
+    "fundamental_momentum": 0.08,    # was 0.10
     "volume_accumulation": 0.08,
-    "insider_buying": 0.07,
-    "volatility_setup": 0.06,
-    "short_squeeze": 0.04,
-    "institutional_ownership": 0.05,
-    "pattern_trading": 0.05,
-    "swing_setup": 0.10,
+    "insider_buying": 0.05,          # was 0.07
+    "volatility_setup": 0.07,        # was 0.06
+    "short_squeeze": 0.03,           # was 0.04
+    "institutional_ownership": 0.04, # was 0.05
+    "pattern_trading": 0.07,         # was 0.05 - chart structure matters for swing
+    "swing_setup": 0.16,             # was 0.10 - now the single largest driver
     "political_geo": 0.01,
     "politician_trade": 0.01,
 }

@@ -499,7 +499,13 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
             log_event("ticker_failed", ticker=ticker, error=str(exc))
             continue
 
-    stage2_ranked = sorted(stage2_rows, key=lambda x: x["score"], reverse=True)[: cfg.target_stage2_size]
+    # Rank stage 2 by the OPPORTUNITY score, not the blended score. Early in the funnel
+    # the catalyst/quality buckets are still at their neutral default (50), so ranking on
+    # the blended score compresses everything toward the middle and can drop genuinely
+    # strong technical/swing setups before they are ever deep-analyzed.
+    stage2_ranked = sorted(
+        stage2_rows, key=lambda x: x.get("opportunity_score", x["score"]), reverse=True
+    )[: cfg.target_stage2_size]
     bear_cases = sorted(bear_candidates, key=lambda x: x["bear_score"], reverse=True)[:BEAR_CASE_N]
     log_event("top_bear_cases", count=len(bear_cases), tickers=[r["ticker"] for r in bear_cases])
     update_universe_stages(universe_summary, stage2=[r["ticker"] for r in stage2_ranked])
@@ -638,6 +644,11 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
         row["top_risks"] = top_risks(row)
 
     min_confidence = env_float("MIN_RECOMMENDATION_CONFIDENCE", 55.0)
+    # Regime gate: in a weak/RISK_OFF tape, demand higher conviction before issuing a
+    # swing-long. Stops the bot from confidently recommending longs into a falling market.
+    if str(regime.get("regime")) == "RISK_OFF":
+        min_confidence = min(95.0, min_confidence + 8.0)
+        log_event("risk_off_confidence_gate", min_confidence=min_confidence)
     max_recommendations = env_int("MAX_RECOMMENDATIONS", MAX_RECOMMENDATIONS)
     ranked_final = sorted(top_20, key=lambda x: (x.get("recommendation_confidence", 0), x["score"]), reverse=True)
     final_results = [row for row in ranked_final if row.get("recommendation_confidence", 0) >= min_confidence][:max_recommendations]

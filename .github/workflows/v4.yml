@@ -2,10 +2,12 @@ name: V4 Stock Bot
 
 on:
   schedule:
-    - cron: "30 13 * * 1-5"
-    - cron: "30 14 * * 1-5"
-    - cron: "0 5 * * 1"
-    - cron: "0 6 * * 1"
+    # Daily 7:05 AM Pacific (14:05 UTC during PDT, 15:05 UTC during PST).
+    - cron: "5 14 * * *"
+    - cron: "5 15 * * *"
+    # Sunday 8:00 PM Pacific (Mon 03:00 UTC during PDT, Mon 04:00 UTC during PST).
+    - cron: "0 3 * * 1"
+    - cron: "0 4 * * 1"
   workflow_dispatch:
 
 jobs:
@@ -15,11 +17,11 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -36,8 +38,9 @@ jobs:
           hour=$(TZ=America/Los_Angeles date +%H)
           minute=$(TZ=America/Los_Angeles date +%M)
           day=$(TZ=America/Los_Angeles date +%u)
-          if { [ "$day" -ge 1 ] && [ "$day" -le 5 ] && [ "$hour" = "06" ] && [ "$minute" = "30" ]; } || \
-             { [ "$day" = "7" ] && [ "$hour" = "22" ] && [ "$minute" = "00" ]; }; then
+          # Run every day at 7:05 AM Pacific, plus Sunday at 8:00 PM Pacific.
+          if { [ "$hour" = "07" ] && [ "$minute" = "05" ]; } || \
+             { [ "$day" = "7" ] && [ "$hour" = "20" ] && [ "$minute" = "00" ]; }; then
             echo "run_bot=true" >> "$GITHUB_OUTPUT"
           else
             echo "run_bot=false" >> "$GITHUB_OUTPUT"
@@ -72,6 +75,8 @@ jobs:
           MIN_MARKET_CAP: ${{ secrets.MIN_MARKET_CAP }}
           MIN_RECOMMENDATION_CONFIDENCE: ${{ secrets.MIN_RECOMMENDATION_CONFIDENCE }}
           MAX_RECOMMENDATIONS: ${{ secrets.MAX_RECOMMENDATIONS }}
+          LEARNING_EVAL_HORIZON_DAYS: ${{ secrets.LEARNING_EVAL_HORIZON_DAYS }}
+          LEARNING_REWARD_ALPHA_SCALE: ${{ secrets.LEARNING_REWARD_ALPHA_SCALE }}
           INCLUDE_MICROCAPS: ${{ secrets.INCLUDE_MICROCAPS }}
           INCLUDE_REDDIT_IN_UNIVERSE: ${{ secrets.INCLUDE_REDDIT_IN_UNIVERSE }}
           INCLUDE_ETF_HOLDINGS: ${{ secrets.INCLUDE_ETF_HOLDINGS }}
