@@ -79,7 +79,10 @@
     "2026-06-05:TROW:4",
     "2026-06-05:UNH:1",
     "2026-06-05:VLO:15",
-    "2026-06-05:WDC:10"
+    "2026-06-05:WDC:10",
+    "2026-06-08:AEP:SHORT:3",
+    "2026-06-08:MCHP:SHORT:1",
+    "2026-06-08:NVDA:SHORT:2"
   ],
   "evaluated_recommendations": [
     "2026-06-03:AAPL:3",
@@ -161,7 +164,10 @@
     "2026-06-05:TROW:4",
     "2026-06-05:UNH:1",
     "2026-06-05:VLO:15",
-    "2026-06-05:WDC:10"
+    "2026-06-05:WDC:10",
+    "2026-06-08:AEP:SHORT:3",
+    "2026-06-08:MCHP:SHORT:1",
+    "2026-06-08:NVDA:SHORT:2"
   ],
   "evaluation_history": [
     {
@@ -1468,22 +1474,76 @@
       "spy_return_pct": 0.0,
       "ticker": "MRNA",
       "ticker_return_pct": -2.9261333605300033
+    },
+    {
+      "alpha_return_pct": -5.097399982235817,
+      "benchmark_return_pct": -0.7210326156061431,
+      "date": "2026-06-08",
+      "direction": "SHORT",
+      "entry_price": 88.34,
+      "evaluated_at": "2026-06-09T13:41:59.620561+00:00",
+      "evaluation_id": "2026-06-08:MCHP:SHORT:1",
+      "latest_price": 93.4800033569336,
+      "learning_reward": -1.0,
+      "position_return_pct": -5.81843259784196,
+      "recommendation_confidence": 99.15,
+      "regime": "nan",
+      "score": 100.0,
+      "spy_return_pct": 0.7210326156061431,
+      "ticker": "MCHP",
+      "ticker_return_pct": 5.81843259784196
+    },
+    {
+      "alpha_return_pct": -1.5169012904914903,
+      "benchmark_return_pct": -0.7210326156061431,
+      "date": "2026-06-08",
+      "direction": "SHORT",
+      "entry_price": 205.1,
+      "evaluated_at": "2026-06-09T13:41:59.749912+00:00",
+      "evaluation_id": "2026-06-08:NVDA:SHORT:2",
+      "latest_price": 209.69000244140625,
+      "learning_reward": -0.30338025809829805,
+      "position_return_pct": -2.2379339060976333,
+      "recommendation_confidence": 95.05,
+      "regime": "nan",
+      "score": 99.28,
+      "spy_return_pct": 0.7210326156061431,
+      "ticker": "NVDA",
+      "ticker_return_pct": 2.2379339060976333
+    },
+    {
+      "alpha_return_pct": 2.5485076200223666,
+      "benchmark_return_pct": -0.7210326156061431,
+      "date": "2026-06-08",
+      "direction": "SHORT",
+      "entry_price": 129.14,
+      "evaluated_at": "2026-06-09T13:42:00.076440+00:00",
+      "evaluation_id": "2026-06-08:AEP:SHORT:3",
+      "latest_price": 126.77999877929688,
+      "learning_reward": 0.5097015240044733,
+      "position_return_pct": 1.8274750044162236,
+      "recommendation_confidence": 89.55,
+      "regime": "nan",
+      "score": 94.08,
+      "spy_return_pct": 0.7210326156061431,
+      "ticker": "AEP",
+      "ticker_return_pct": -1.8274750044162236
     }
   ],
   "last_evaluation_summary": {
-    "avg_alpha_return_pct": -4.376581868430733,
+    "avg_alpha_return_pct": -1.355264550901647,
     "best": {
-      "alpha_return_pct": 6.881595359136838,
-      "ticker": "HUM"
+      "alpha_return_pct": 2.5485076200223666,
+      "ticker": "AEP"
     },
-    "evaluated_new": 35,
-    "win_rate": 0.3142857142857143,
+    "evaluated_new": 3,
+    "win_rate": 0.3333333333333333,
     "worst": {
-      "alpha_return_pct": -19.967204280223616,
-      "ticker": "MU"
+      "alpha_return_pct": -5.097399982235817,
+      "ticker": "MCHP"
     }
   },
-  "last_updated": "2026-06-08T13:02:41.500122+00:00",
+  "last_updated": "2026-06-09T13:42:00.076558+00:00",
   "learned_weights": {
     "analyst_revisions": 0.06671675175183218,
     "earnings_quality": 0.05032385825860143,
