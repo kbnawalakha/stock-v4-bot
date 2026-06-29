@@ -89,7 +89,10 @@
     "2026-06-09:PH:SHORT:5",
     "2026-06-09:PNW:SHORT:7",
     "2026-06-09:TT:SHORT:3",
-    "2026-06-09:UNH:BULL:1"
+    "2026-06-09:UNH:BULL:1",
+    "2026-06-16:AEE:SHORT:2",
+    "2026-06-16:AEP:SHORT:3",
+    "2026-06-16:CMS:SHORT:1"
   ],
   "evaluated_recommendations": [
     "2026-06-03:AAPL:3",
@@ -181,7 +184,10 @@
     "2026-06-09:PH:SHORT:5",
     "2026-06-09:PNW:SHORT:7",
     "2026-06-09:TT:SHORT:3",
-    "2026-06-09:UNH:BULL:1"
+    "2026-06-09:UNH:BULL:1",
+    "2026-06-16:AEE:SHORT:2",
+    "2026-06-16:AEP:SHORT:3",
+    "2026-06-16:CMS:SHORT:1"
   ],
   "evaluation_history": [
     {
@@ -1668,22 +1674,76 @@
       "spy_return_pct": 1.8017813603987465,
       "ticker": "PNW",
       "ticker_return_pct": 2.679452713190722
+    },
+    {
+      "alpha_return_pct": -5.348889203136409,
+      "benchmark_return_pct": 2.0259149173474933,
+      "date": "2026-06-16",
+      "direction": "SHORT",
+      "entry_price": 74.03,
+      "evaluated_at": "2026-06-29T13:54:42.215359+00:00",
+      "evaluation_id": "2026-06-16:CMS:SHORT:1",
+      "latest_price": 76.48999786376953,
+      "learning_reward": -1.0,
+      "position_return_pct": -3.3229742857889155,
+      "recommendation_confidence": 92.9,
+      "regime": "nan",
+      "score": 99.44,
+      "spy_return_pct": -2.0259149173474933,
+      "ticker": "CMS",
+      "ticker_return_pct": 3.3229742857889155
+    },
+    {
+      "alpha_return_pct": -4.596515654878464,
+      "benchmark_return_pct": 2.0259149173474933,
+      "date": "2026-06-16",
+      "direction": "SHORT",
+      "entry_price": 110.48,
+      "evaluated_at": "2026-06-29T13:54:42.409144+00:00",
+      "evaluation_id": "2026-06-16:AEE:SHORT:2",
+      "latest_price": 113.31999969482422,
+      "learning_reward": -0.9193031309756927,
+      "position_return_pct": -2.5706007375309703,
+      "recommendation_confidence": 91.25,
+      "regime": "nan",
+      "score": 96.8,
+      "spy_return_pct": -2.0259149173474933,
+      "ticker": "AEE",
+      "ticker_return_pct": 2.5706007375309703
+    },
+    {
+      "alpha_return_pct": -6.041334350000427,
+      "benchmark_return_pct": 2.0259149173474933,
+      "date": "2026-06-16",
+      "direction": "SHORT",
+      "entry_price": 129.75,
+      "evaluated_at": "2026-06-29T13:54:42.677131+00:00",
+      "evaluation_id": "2026-06-16:AEP:SHORT:3",
+      "latest_price": 134.9600067138672,
+      "learning_reward": -1.0,
+      "position_return_pct": -4.0154194326529336,
+      "recommendation_confidence": 90.25,
+      "regime": "nan",
+      "score": 95.2,
+      "spy_return_pct": -2.0259149173474933,
+      "ticker": "AEP",
+      "ticker_return_pct": 4.0154194326529336
     }
   ],
   "last_evaluation_summary": {
-    "avg_alpha_return_pct": -0.6629092530845632,
+    "avg_alpha_return_pct": -5.328913069338433,
     "best": {
-      "alpha_return_pct": 6.090228267428421,
-      "ticker": "CVX"
+      "alpha_return_pct": -4.596515654878464,
+      "ticker": "AEE"
     },
-    "evaluated_new": 7,
-    "win_rate": 0.42857142857142855,
+    "evaluated_new": 3,
+    "win_rate": 0.0,
     "worst": {
-      "alpha_return_pct": -6.955311787557139,
-      "ticker": "EOG"
+      "alpha_return_pct": -6.041334350000427,
+      "ticker": "AEP"
     }
   },
-  "last_updated": "2026-06-16T22:16:09.554410+00:00",
+  "last_updated": "2026-06-29T13:54:42.677254+00:00",
   "learned_weights": {
     "analyst_revisions": 0.06676177071471903,
     "earnings_quality": 0.05030335769194239,
