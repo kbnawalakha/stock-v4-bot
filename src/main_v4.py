@@ -212,7 +212,9 @@ def recommendation_confidence(row: dict, regime: dict | None = None) -> float:
         data_bonus += min(10.0, sentiment_confidence * 10)
     if safe_float(row.get("swing_details", {}).get("risk_reward"), 0.0) >= 1.5:
         data_bonus += 8.0
-    if row.get("pre_market_activity", 50) != 50 or row.get("post_market_activity", 50) != 50:
+    # Require a meaningful extended-hours move, not any float that differs from
+    # the neutral 50.0 placeholder by rounding noise.
+    if abs(float(row.get("pre_market_activity", 50)) - 50) >= 5 or abs(float(row.get("post_market_activity", 50)) - 50) >= 5:
         data_bonus += 4.0
     confidence = (
         safe_float(row.get("score"), 0.0) * 0.35
@@ -799,7 +801,9 @@ def analyze_universe(base_weights: dict[str, float] | None = None):
         row["regime_confidence"] = regime["confidence"]
         row["market_breadth_regime"] = breadth["regime"]
         row["market_breadth_score"] = breadth["breadth_score"]
-        row["score"] = staged_final_score(row, regime, breadth, weights)
+        # Pass untilted base weights: staged_final_score applies the regime tilt
+        # itself, so passing the pre-tilted `weights` would double-apply it.
+        row["score"] = staged_final_score(row, regime, breadth, base_weights)
         row["score"] = apply_reddit_blend(row["score"], row, reddit_by_ticker, blend_reddit)
         apply_bearish_news_caps(row)
         row["earnings_score"] = earnings_setup_score(row)
@@ -1494,10 +1498,22 @@ def build_email(
 
 
 def main():
-    learned_weights = refresh_learning_state()
+    # Learning-state refresh is best-effort: a stale/failed evaluation must not
+    # prevent today's recommendations from being generated and emailed.
+    try:
+        learned_weights = refresh_learning_state()
+    except Exception as exc:
+        log_event("learning_refresh_failed", error=str(exc))
+        learned_weights = None
     log_event("learned_weights", weights=learned_weights)
     results, spy_df, qqq_df, regime, sector_extremes, reddit_plays, universe_summary, bear_cases, watchlist = analyze_universe(learned_weights)
-    previous_downside_alerts = historical_downside_alerts()
+
+    try:
+        previous_downside_alerts = historical_downside_alerts()
+    except Exception as exc:
+        log_event("historical_downside_alerts_failed", error=str(exc))
+        previous_downside_alerts = []
+
     html, text, tracked_recommendations = build_email(
         results,
         spy_df,
@@ -1516,5 +1532,27 @@ def main():
     send_email("Daily Stock Alpha Report", html, text)
 
 
+def _send_failure_notice(exc: Exception) -> None:
+    """Surface a hard failure by email so a broken run is visible instead of
+    silently producing no report (which is how the bot stalled unnoticed)."""
+    import traceback
+
+    tb = traceback.format_exc()
+    log_event("run_failed", error=str(exc))
+    try:
+        text = (
+            "The daily stock bot failed before it could send recommendations.\n\n"
+            f"Error: {exc}\n\n{tb}"
+        )
+        html = f"<html><body><h2>Stock bot run failed</h2><pre>{escape(text)}</pre></body></html>"
+        send_email("Daily Stock Alpha Report - RUN FAILED", html, text)
+    except Exception as notice_exc:
+        log_event("failure_notice_failed", error=str(notice_exc))
+
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        _send_failure_notice(exc)
+        raise

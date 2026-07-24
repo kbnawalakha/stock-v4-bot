@@ -35,16 +35,39 @@ jobs:
             exit 0
           fi
 
+          # GitHub Actions scheduled runs are frequently delayed 5-20+ minutes,
+          # so the previous exact-minute guard (minute == "30") silently skipped
+          # most triggers and no email was sent. We now match a Pacific-time HOUR
+          # WINDOW that tolerates DST shifts and delays, and de-duplicate by date
+          # so the two daily crons cannot double-run.
           hour=$(TZ=America/Los_Angeles date +%H)
           minute=$(TZ=America/Los_Angeles date +%M)
           day=$(TZ=America/Los_Angeles date +%u)
-          # Run weekdays at 6:30 AM Pacific, plus Sunday at 10:00 PM Pacific.
-          if { [ "$day" -ge 1 ] && [ "$day" -le 5 ] && [ "$hour" = "06" ] && [ "$minute" = "30" ]; } || \
-             { [ "$day" = "7" ] && [ "$hour" = "22" ] && [ "$minute" = "00" ]; }; then
+          today=$(TZ=America/Los_Angeles date +%Y-%m-%d)
+
+          in_window=false
+          # Weekdays: allow 06:00-07:59 PT (covers both cron slots across DST + delay).
+          if [ "$day" -ge 1 ] && [ "$day" -le 5 ] && { [ "$hour" = "06" ] || [ "$hour" = "07" ]; }; then
+            in_window=true
+          fi
+          # Sunday evening: allow 22:00-23:59 PT.
+          if [ "$day" = "7" ] && { [ "$hour" = "22" ] || [ "$hour" = "23" ]; }; then
+            in_window=true
+          fi
+
+          # De-dup: if predictions.csv already has a row dated today (PT), skip so
+          # the second cron of the day does not run again.
+          already_ran=false
+          if [ -f predictions.csv ] && grep -q ",${today}," predictions.csv; then
+            already_ran=true
+          fi
+
+          if [ "$in_window" = "true" ] && [ "$already_ran" = "false" ]; then
             echo "run_bot=true" >> "$GITHUB_OUTPUT"
+            echo "Running bot. Pacific Time: day=${day} ${hour}:${minute}"
           else
             echo "run_bot=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping run outside configured Pacific Time schedule. Local time: day=${day} ${hour}:${minute}"
+            echo "Skipping. PT day=${day} ${hour}:${minute} in_window=${in_window} already_ran=${already_ran}"
           fi
 
       - run: python -m unittest discover -s tests

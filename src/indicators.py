@@ -13,19 +13,22 @@ def pct_return(df: pd.DataFrame, days: int) -> float:
 
 
 def trend_score(df: pd.DataFrame) -> float:
-    if len(df) < 200:
-        return 0.0
+    # Degrade gracefully for shorter histories instead of returning 0
+    # (maximally bearish), which punished newer listings for missing data.
+    if len(df) < 60:
+        return 50.0
     close = df["Close"]
     price = close.iloc[-1]
     ma20 = close.rolling(20).mean().iloc[-1]
     ma50 = close.rolling(50).mean().iloc[-1]
-    ma200 = close.rolling(200).mean().iloc[-1]
-    score = 0
-    if price > ma20: score += 30
-    if price > ma50: score += 30
-    if price > ma200: score += 20
-    if ma20 > ma50: score += 20
-    return clamp(score, 0, 100)
+    checks = [(price > ma20, 30), (price > ma50, 30), (ma20 > ma50, 20)]
+    possible = 80
+    if len(df) >= 200:
+        ma200 = close.rolling(200).mean().iloc[-1]
+        checks.append((price > ma200, 20))
+        possible = 100
+    earned = sum(points for passed, points in checks if passed)
+    return clamp(earned / possible * 100, 0, 100)
 
 
 def relative_strength_score(stock_df: pd.DataFrame, spy_df: pd.DataFrame, qqq_df: pd.DataFrame) -> float:
@@ -57,10 +60,10 @@ def volatility_compression_score(df: pd.DataFrame) -> float:
 
 
 def high_52_week_score(df: pd.DataFrame) -> float:
-    if len(df) < 120:
+    if len(df) < 60:
         return 0.0
     close = df["Close"]
-    high_52 = close.tail(252).max()
+    high_52 = close.tail(min(252, len(close))).max()
     if high_52 <= 0:
         return 0.0
     proximity = close.iloc[-1] / high_52
@@ -70,7 +73,9 @@ def high_52_week_score(df: pd.DataFrame) -> float:
 def volume_surge_score(df: pd.DataFrame) -> float:
     if len(df) < 31:
         return 0.0
-    avg_vol = df["Volume"].tail(30).mean()
+    # Exclude today's volume from its own baseline so a surge is not dampened
+    # by being averaged into the comparison window.
+    avg_vol = df["Volume"].iloc[-31:-1].mean()
     today_vol = df["Volume"].iloc[-1]
     if avg_vol <= 0:
         return 0.0

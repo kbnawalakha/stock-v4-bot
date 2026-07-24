@@ -44,6 +44,37 @@ def weighted_average(parts: list[tuple[float, float]]) -> float:
     return sum(value * weight for value, weight in parts if weight > 0) / total_weight
 
 
+def informative_weighted_average(
+    parts: list[tuple[float, float]],
+    neutral: float = 50.0,
+    missing_weight_factor: float = 0.2,
+    neutral_tol: float = 0.5,
+) -> float:
+    """Weighted average that down-weights signals sitting at their neutral
+    placeholder (e.g. 50.0 when an API key is missing or there is no data).
+
+    Signals with real information keep full weight; placeholder-neutral signals
+    are kept at a small fraction of their weight so they nudge, but do not
+    dilute, the composite. This prevents the common failure mode where many
+    missing signals default to 50 and crush every stock's score into a narrow
+    band, destroying the ranking's ability to separate winners from losers.
+
+    If every signal is neutral the result is the neutral value (not 0), so a
+    data-starved row scores as genuinely neutral rather than as a hard zero.
+    """
+    adjusted = []
+    for value, weight in parts:
+        if weight <= 0:
+            continue
+        if abs(float(value) - neutral) <= neutral_tol:
+            weight *= missing_weight_factor
+        adjusted.append((float(value), weight))
+    total_weight = sum(weight for _, weight in adjusted)
+    if total_weight <= 0:
+        return float(neutral)
+    return sum(value * weight for value, weight in adjusted) / total_weight
+
+
 def freshness_warning(missing: list[str]) -> str:
     if not missing:
         return "all core data available"

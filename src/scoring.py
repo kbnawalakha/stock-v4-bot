@@ -1,5 +1,5 @@
 from config import STRATEGY_WEIGHTS
-from signal_utils import clamp, signed_to_percent, weighted_average
+from signal_utils import clamp, informative_weighted_average, signed_to_percent, weighted_average
 
 
 def regime_adjusted_weights(regime: str | None, base_weights: dict[str, float] | None = None) -> dict[str, float]:
@@ -21,6 +21,18 @@ def regime_adjusted_weights(regime: str | None, base_weights: dict[str, float] |
     return {key: value / total for key, value in weights.items()}
 
 
+def _literal_weight_scale(weights: dict[str, float]) -> float:
+    """Scale factor for hard-coded literal weights so they stay on the same
+    relative scale as the (possibly normalized) strategy weights. Without this,
+    normalizing STRATEGY_WEIGHTS (sum ~1.39) to 1.0 silently inflates the
+    influence of literal weights like risk_quality/liquidity by ~39%."""
+    base_total = sum(STRATEGY_WEIGHTS.values())
+    if base_total <= 0:
+        return 1.0
+    total = sum(max(0.0, weights.get(key, 0.0)) for key in STRATEGY_WEIGHTS)
+    return total / base_total if total > 0 else 1.0
+
+
 def final_score(features: dict, weights: dict[str, float] | None = None) -> float:
     active_weights = regime_adjusted_weights(None, weights or STRATEGY_WEIGHTS)
     total = 0.0
@@ -33,7 +45,8 @@ def final_score(features: dict, weights: dict[str, float] | None = None) -> floa
 
 def opportunity_score(row: dict, weights: dict[str, float] | None = None) -> float:
     weights = weights or STRATEGY_WEIGHTS
-    return weighted_average([
+    literal = _literal_weight_scale(weights)
+    return informative_weighted_average([
         (row.get("trend", 50.0), weights.get("trend", 0.10)),
         (signed_to_percent(row.get("relative_strength", 0.0)), weights.get("relative_strength", 0.08)),
         (signed_to_percent(row.get("sector_strength", 0.0)), weights.get("sector_strength", 0.06)),
@@ -44,17 +57,22 @@ def opportunity_score(row: dict, weights: dict[str, float] | None = None) -> flo
         (row.get("volatility_setup", 50.0), weights.get("volatility_setup", 0.07)),
         (row.get("swing_setup", 50.0), weights.get("swing_setup", 0.16)),
         # Reward concrete, favorable risk/reward on the swing setup itself.
-        (row.get("swing_risk_reward", 50.0), 0.06),
+        (row.get("swing_risk_reward", 50.0), 0.06 * literal),
         (row.get("pattern_trading", 50.0), weights.get("pattern_trading", 0.07)),
         (row.get("options_flow", 50.0), weights.get("options_flow", 0.06)),
-        (row.get("etf_flow_exposure", 50.0), 0.02),
+        (row.get("etf_flow_exposure", 50.0), 0.02 * literal),
     ])
 
 
 def catalyst_score(row: dict, weights: dict[str, float] | None = None) -> float:
     weights = weights or STRATEGY_WEIGHTS
-    return weighted_average([
-        (row.get("news_sentiment", 50.0), weights.get("news_sentiment", 0.13)),
+    # Pull news_sentiment toward neutral before weighting: it is a single, often
+    # volatile/miscalibrated LLM reading, and at full swing it was single-handedly
+    # dragging every catalyst_score down (observed mean ~12 -> catalyst ~38 for all
+    # names). Dampening keeps it as a tilt, not a dominator.
+    news_sentiment = 50.0 + (float(row.get("news_sentiment", 50.0)) - 50.0) * 0.6
+    return informative_weighted_average([
+        (news_sentiment, weights.get("news_sentiment", 0.13)),
         (row.get("analyst_revisions", 50.0), weights.get("analyst_revisions", 0.10)),
         (row.get("earnings_quality", row.get("earnings", 50.0)), weights.get("earnings_quality", 0.08)),
         (row.get("insider_buying", 50.0), weights.get("insider_buying", 0.07)),
@@ -66,13 +84,14 @@ def catalyst_score(row: dict, weights: dict[str, float] | None = None) -> float:
 
 def quality_score(row: dict, weights: dict[str, float] | None = None) -> float:
     weights = weights or STRATEGY_WEIGHTS
-    return weighted_average([
-        (row.get("risk_quality", 50.0), 0.08),
+    literal = _literal_weight_scale(weights)
+    return informative_weighted_average([
+        (row.get("risk_quality", 50.0), 0.08 * literal),
         (row.get("fundamental_momentum", 50.0), weights.get("fundamental_momentum", 0.10)),
         (row.get("institutional_ownership", 50.0), weights.get("institutional_ownership", 0.05)),
         (row.get("pattern_trading", 50.0), weights.get("pattern_trading", 0.05)),
-        (row.get("swing_risk_reward", 50.0), 0.04),
-        (row.get("liquidity_score", 50.0), 0.05),
+        (row.get("swing_risk_reward", 50.0), 0.04 * literal),
+        (row.get("liquidity_score", 50.0), 0.05 * literal),
     ])
 
 
@@ -94,7 +113,10 @@ def staged_final_score(
     breadth: dict | None = None,
     weights: dict[str, float] | None = None,
 ) -> float:
-    active_weights = regime_adjusted_weights(None, weights or STRATEGY_WEIGHTS)
+    # Apply the regime tilt here (previously the regime was hard-coded to None,
+    # so the tilt only happened if callers pre-tilted the weights themselves).
+    regime_name = (regime or {}).get("regime") if isinstance(regime, dict) else regime
+    active_weights = regime_adjusted_weights(regime_name, weights or STRATEGY_WEIGHTS)
     opp = opportunity_score(row, active_weights)
     cat = catalyst_score(row, active_weights)
     qual = quality_score(row, active_weights)
@@ -127,20 +149,22 @@ def apply_reddit_blend(score: float, row: dict, reddit_by_ticker: dict[str, dict
 
 
 def earnings_setup_score(row: dict) -> float:
+    # Signed signals (-100..100) are mapped to the 0..100 percent scale so they
+    # carry the same spread per unit of weight as the unsigned inputs.
     return (
         row.get("earnings_proximity", 0) * 0.25
-        + row.get("relative_strength", 0) * 0.25
+        + signed_to_percent(row.get("relative_strength", 0.0)) * 0.25
         + row.get("trend", 0) * 0.15
-        + row.get("news_catalyst", 0) * 0.20
-        + row.get("breakout", 0) * 0.15
+        + signed_to_percent(row.get("news_catalyst", 0.0)) * 0.20
+        + signed_to_percent(row.get("breakout", 0.0)) * 0.15
     )
 
 
 def catalyst_watch_score(row: dict) -> float:
     return (
-        row.get("news_catalyst", 0) * 0.35
-        + row.get("political_geo", 0) * 0.25
-        + row.get("politician_trade", 0) * 0.15
-        + row.get("relative_strength", 0) * 0.15
-        + row.get("breakout", 0) * 0.10
+        signed_to_percent(row.get("news_catalyst", 0.0)) * 0.35
+        + signed_to_percent(row.get("political_geo", 0.0)) * 0.25
+        + signed_to_percent(row.get("politician_trade", 0.0)) * 0.15
+        + signed_to_percent(row.get("relative_strength", 0.0)) * 0.15
+        + signed_to_percent(row.get("breakout", 0.0)) * 0.10
     )

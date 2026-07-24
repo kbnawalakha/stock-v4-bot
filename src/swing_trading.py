@@ -336,9 +336,15 @@ def _risk_component(price: float, ma20: float, rsi: float, atr: float) -> float:
 def _risk_reward(price: float, high: pd.Series, low: pd.Series, atr: float) -> dict[str, float]:
     atr = float(atr) if atr and atr > 0 else price * 0.04
     recent_support = float(low.tail(10).min())
-    stop_loss = max(0.01, min(price - atr * 1.5, recent_support - atr * 0.25))
+    # Use the tighter of the ATR stop and the support stop (previously the
+    # wider via min(), which systematically inflated risk and understated
+    # risk/reward for setups sitting near support), while enforcing a minimum
+    # stop distance of 0.75 ATR so the stop is not inside normal daily noise.
+    stop_loss = max(price - atr * 1.5, recent_support - atr * 0.25)
+    stop_loss = min(stop_loss, price - atr * 0.75)
+    stop_loss = max(0.01, stop_loss)
     if stop_loss >= price:
-        stop_loss = price - atr * 1.5
+        stop_loss = max(0.01, price - atr * 1.5)
     resistance = float(high.tail(55).max())
     target_price = max(price + atr * 2.0, resistance)
     risk = max(price - stop_loss, 0.01)

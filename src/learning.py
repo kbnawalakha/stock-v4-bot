@@ -37,6 +37,9 @@ DOWNSIDE_ALERT_MAX_SCAN = 80
 DOWNSIDE_ALERT_MIN_BEAR_SCORE = 70.0
 DOWNSIDE_ALERT_MIN_LOSS_PCT = -2.0
 
+# Signals stored on a signed -100..100 scale in predictions.csv; everything else is 0..100.
+SIGNED_SIGNALS = {"relative_strength", "sector_strength", "political_geo", "politician_trade"}
+
 
 def _empty_state() -> dict:
     return {
@@ -98,7 +101,9 @@ def refresh_learning_state() -> dict[str, float]:
 
     evaluated = set(state.get("evaluated_recommendations") or state.get("evaluated", []))
     today = datetime.now(timezone.utc).date()
-    spy_df = get_history("SPY", period="2mo")
+    # 1y window so the benchmark covers older unevaluated predictions; the
+    # coverage check in _benchmark_return_since skips anything outside it.
+    spy_df = get_history("SPY", period="1y")
     updated = 0
     outcome_records = []
 
@@ -305,6 +310,10 @@ def _return_since(ticker: str, entry_price: float, rec_date=None, horizon: int =
 def _benchmark_return_since(spy_df: pd.DataFrame, rec_date, horizon: int = EVAL_HORIZON_DAYS) -> float | None:
     """SPY forward return over the same fixed horizon, for a like-for-like comparison."""
     if spy_df.empty:
+        return None
+    # If the history window starts after the recommendation date the anchored
+    # entry would be wrong, producing corrupt alpha; skip evaluation instead.
+    if spy_df.index[0].date() > rec_date:
         return None
     close = spy_df["Close"]
     dated = close[close.index.date >= rec_date]

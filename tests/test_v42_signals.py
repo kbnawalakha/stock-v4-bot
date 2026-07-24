@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 import learning
 import gemini_sentiment
+import analyst_revisions
 from analyst_revisions import analyst_revision_score
 from insider_buying import insider_buying_score
 from fmp_client import FMPClient
@@ -27,7 +28,8 @@ from main_v4 import (
 from market_breadth import market_breadth_regime
 from news_catalyst import catalyst_details
 from opening_activity import _session_activity_score
-from scoring import apply_reddit_blend, regime_adjusted_weights
+from scoring import apply_reddit_blend, catalyst_score, regime_adjusted_weights, staged_final_score
+from signal_utils import informative_weighted_average
 from reddit_client import _fetch_subreddit_listing
 from swing_trading import bear_case_score, swing_trading_score
 from universe_builder import build_daily_universe, normalize_ticker, _valid_common_stock_symbol
@@ -59,10 +61,48 @@ class V42SignalTests(unittest.TestCase):
         os.environ.update(self.original_env)
 
     def test_missing_api_keys_return_neutral(self):
-        analyst = analyst_revision_score("AAPL")
+        # With no FMP key and no yfinance analyst data, both signals are neutral.
+        # Patch the yfinance fallback source so the test never touches the network.
+        with patch("analyst_revisions.get_ticker_obj", side_effect=Exception("offline")):
+            analyst = analyst_revision_score("AAPL")
         insider = insider_buying_score("AAPL")
         self.assertEqual(analyst["score"], 0.0)
         self.assertEqual(insider["score"], 0.0)
+
+    def test_analyst_revisions_use_yfinance_when_fmp_unavailable(self):
+        import pandas as pd
+
+        class FakeTicker:
+            upgrades_downgrades = pd.DataFrame(
+                {
+                    "Firm": ["A", "B", "C"],
+                    "ToGrade": ["Buy", "Overweight", "Buy"],
+                    "FromGrade": ["Hold", "Neutral", "Hold"],
+                    "Action": ["up", "up", "main"],
+                },
+                index=pd.to_datetime(
+                    [pd.Timestamp.now() - pd.Timedelta(days=d) for d in (3, 10, 20)]
+                ),
+            )
+            recommendations_summary = pd.DataFrame(
+                {
+                    "period": ["0m", "-1m", "-2m"],
+                    "strongBuy": [12, 8, 6],
+                    "buy": [10, 9, 8],
+                    "hold": [3, 5, 6],
+                    "sell": [0, 1, 2],
+                    "strongSell": [0, 0, 1],
+                }
+            )
+            analyst_price_targets = {"current": 100.0, "mean": 120.0, "high": 140.0, "low": 95.0}
+            info = {"targetMeanPrice": 120.0, "currentPrice": 100.0}
+            news: list = []
+
+        with patch("analyst_revisions.get_ticker_obj", return_value=FakeTicker()):
+            result = analyst_revision_score("TEST")
+        # Bullish upgrades + improving mix + upside price targets -> positive signal.
+        self.assertGreater(result["score"], 20.0)
+        self.assertIn("yfinance", result["reason"])
 
     def test_scores_stay_in_expected_ranges(self):
         df = self._price_frame()
@@ -76,6 +116,39 @@ class V42SignalTests(unittest.TestCase):
     def test_final_weights_normalize_to_one(self):
         weights = regime_adjusted_weights("RISK_ON")
         self.assertAlmostEqual(sum(weights.values()), 1.0, places=6)
+
+    def test_informative_average_downweights_missing_signals(self):
+        # One strong real signal (90) plus three missing placeholders (50).
+        parts = [(90.0, 0.25), (50.0, 0.25), (50.0, 0.25), (50.0, 0.25)]
+        plain = sum(v * w for v, w in parts) / sum(w for _, w in parts)  # 60.0
+        informative = informative_weighted_average(parts)
+        # The real signal should dominate, pulling the result well above the
+        # diluted plain average.
+        self.assertGreater(informative, plain + 5)
+        self.assertLessEqual(informative, 90.0)
+
+    def test_informative_average_all_missing_returns_neutral(self):
+        parts = [(50.0, 0.3), (50.0, 0.3), (50.0, 0.3)]
+        self.assertAlmostEqual(informative_weighted_average(parts), 50.0, places=6)
+
+    def test_missing_catalyst_signals_do_not_crush_score(self):
+        # A stock with a genuinely strong catalyst but missing analyst/insider
+        # data should not be dragged to neutral by the placeholders.
+        strong = catalyst_score({
+            "news_sentiment": 85.0,
+            "earnings_quality": 82.0,
+            # analyst_revisions, insider_buying, short_squeeze, political absent -> 50
+        })
+        self.assertGreater(strong, 60.0)
+
+    def test_regime_tilt_applied_inside_staged_score(self):
+        row = {
+            "ticker": "T", "trend": 75.0, "opening_activity": 75.0,
+            "swing_setup": 70.0, "options_flow": 75.0, "news_sentiment": 70.0,
+        }
+        neutral = staged_final_score(dict(row))
+        risk_on = staged_final_score(dict(row), {"regime": "RISK_ON", "confidence": 0.8})
+        self.assertNotAlmostEqual(neutral, risk_on, places=3)
 
     def test_empty_data_does_not_crash(self):
         empty = pd.DataFrame()
