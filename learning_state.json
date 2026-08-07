@@ -97,7 +97,11 @@
     "2026-06-29:BMY:SHORT:4",
     "2026-06-29:MU:SHORT:1",
     "2026-06-29:TSN:SHORT:3",
-    "2026-06-29:WBD:SHORT:5"
+    "2026-06-29:WBD:SHORT:5",
+    "2026-07-24:DD:SHORT:4",
+    "2026-07-24:DLR:SHORT:1",
+    "2026-07-24:EMR:SHORT:2",
+    "2026-07-24:STX:SHORT:3"
   ],
   "evaluated_recommendations": [
     "2026-06-03:AAPL:3",
@@ -197,7 +201,11 @@
     "2026-06-29:BMY:SHORT:4",
     "2026-06-29:MU:SHORT:1",
     "2026-06-29:TSN:SHORT:3",
-    "2026-06-29:WBD:SHORT:5"
+    "2026-06-29:WBD:SHORT:5",
+    "2026-07-24:DD:SHORT:4",
+    "2026-07-24:DLR:SHORT:1",
+    "2026-07-24:EMR:SHORT:2",
+    "2026-07-24:STX:SHORT:3"
   ],
   "evaluation_history": [
     {
@@ -1828,22 +1836,94 @@
       "spy_return_pct": 0.9055360286985392,
       "ticker": "WBD",
       "ticker_return_pct": -3.2592561509874107
+    },
+    {
+      "alpha_return_pct": 8.466465497471887,
+      "benchmark_return_pct": -1.0961845778870494,
+      "date": "2026-07-24",
+      "direction": "SHORT",
+      "entry_price": 203.52,
+      "evaluated_at": "2026-08-07T14:32:16.968264+00:00",
+      "evaluation_id": "2026-07-24:DLR:SHORT:1",
+      "latest_price": 188.52000427246094,
+      "learning_reward": 1.0,
+      "position_return_pct": 7.370280919584838,
+      "recommendation_confidence": 100.0,
+      "regime": "nan",
+      "score": 100.0,
+      "spy_return_pct": 1.0961845778870494,
+      "ticker": "DLR",
+      "ticker_return_pct": -7.370280919584838
+    },
+    {
+      "alpha_return_pct": 0.05078947151440083,
+      "benchmark_return_pct": -1.0961845778870494,
+      "date": "2026-07-24",
+      "direction": "SHORT",
+      "entry_price": 148.27,
+      "evaluated_at": "2026-08-07T14:32:17.196795+00:00",
+      "evaluation_id": "2026-07-24:EMR:SHORT:2",
+      "latest_price": 149.82000732421875,
+      "learning_reward": 0.010157894302880166,
+      "position_return_pct": -1.0453951063726485,
+      "recommendation_confidence": 98.25,
+      "regime": "nan",
+      "score": 100.0,
+      "spy_return_pct": 1.0961845778870494,
+      "ticker": "EMR",
+      "ticker_return_pct": 1.0453951063726485
+    },
+    {
+      "alpha_return_pct": 3.149771791550282,
+      "benchmark_return_pct": -1.0961845778870494,
+      "date": "2026-07-24",
+      "direction": "SHORT",
+      "entry_price": 874.08,
+      "evaluated_at": "2026-08-07T14:32:17.367722+00:00",
+      "evaluation_id": "2026-07-24:STX:SHORT:3",
+      "latest_price": 856.1300048828125,
+      "learning_reward": 0.6299543583100564,
+      "position_return_pct": 2.0535872136632327,
+      "recommendation_confidence": 90.5,
+      "regime": "nan",
+      "score": 95.6,
+      "spy_return_pct": 1.0961845778870494,
+      "ticker": "STX",
+      "ticker_return_pct": -2.0535872136632327
+    },
+    {
+      "alpha_return_pct": 1.8639667016013828,
+      "benchmark_return_pct": -1.0961845778870494,
+      "date": "2026-07-24",
+      "direction": "SHORT",
+      "entry_price": 138.06,
+      "evaluated_at": "2026-08-07T14:32:17.615890+00:00",
+      "evaluation_id": "2026-07-24:DD:SHORT:4",
+      "latest_price": 137.0,
+      "learning_reward": 0.37279334032027656,
+      "position_return_pct": 0.7677821237143334,
+      "recommendation_confidence": 88.75,
+      "regime": "nan",
+      "score": 92.8,
+      "spy_return_pct": 1.0961845778870494,
+      "ticker": "DD",
+      "ticker_return_pct": -0.7677821237143334
     }
   ],
   "last_evaluation_summary": {
-    "avg_alpha_return_pct": 3.7384920140564986,
+    "avg_alpha_return_pct": 3.3827483655344883,
     "best": {
-      "alpha_return_pct": 14.029760214191867,
-      "ticker": "MU"
+      "alpha_return_pct": 8.466465497471887,
+      "ticker": "DLR"
     },
-    "evaluated_new": 5,
-    "win_rate": 0.8,
+    "evaluated_new": 4,
+    "win_rate": 1.0,
     "worst": {
-      "alpha_return_pct": -0.41690857894947086,
-      "ticker": "BDX"
+      "alpha_return_pct": 0.05078947151440083,
+      "ticker": "EMR"
     }
   },
-  "last_updated": "2026-07-24T17:53:00.632489+00:00",
+  "last_updated": "2026-08-07T14:32:17.616021+00:00",
   "learned_weights": {
     "analyst_revisions": 0.06676177071471903,
     "earnings_quality": 0.05030335769194239,
