@@ -124,7 +124,12 @@
     "2026-08-11:ARM:SHORT:5",
     "2026-08-11:BAC:BULL:2",
     "2026-08-11:INTC:SHORT:6",
-    "2026-08-11:TPR:BULL:1"
+    "2026-08-11:TPR:BULL:1",
+    "2026-08-12:ARM:SHORT:4",
+    "2026-08-12:CAT:SHORT:5",
+    "2026-08-12:GEV:SHORT:1",
+    "2026-08-12:GS:SHORT:3",
+    "2026-08-12:KLAC:SHORT:2"
   ],
   "evaluated_recommendations": [
     "2026-06-03:AAPL:3",
@@ -251,7 +256,12 @@
     "2026-08-11:ARM:SHORT:5",
     "2026-08-11:BAC:BULL:2",
     "2026-08-11:INTC:SHORT:6",
-    "2026-08-11:TPR:BULL:1"
+    "2026-08-11:TPR:BULL:1",
+    "2026-08-12:ARM:SHORT:4",
+    "2026-08-12:CAT:SHORT:5",
+    "2026-08-12:GEV:SHORT:1",
+    "2026-08-12:GS:SHORT:3",
+    "2026-08-12:KLAC:SHORT:2"
   ],
   "evaluation_history": [
     {
@@ -2368,22 +2378,112 @@
       "spy_return_pct": 0.2245095092181293,
       "ticker": "INTC",
       "ticker_return_pct": 4.075754164864187
+    },
+    {
+      "alpha_return_pct": -0.058231394160457306,
+      "benchmark_return_pct": -0.8660309552200873,
+      "date": "2026-08-12",
+      "direction": "SHORT",
+      "entry_price": 1037.59,
+      "evaluated_at": "2026-08-13T14:37:12.719053+00:00",
+      "evaluation_id": "2026-08-12:GEV:SHORT:1",
+      "latest_price": 1047.1800537109375,
+      "learning_reward": -0.011646278832091461,
+      "position_return_pct": -0.9242623493805446,
+      "recommendation_confidence": 93.7,
+      "regime": "nan",
+      "score": 100.0,
+      "spy_return_pct": 0.8660309552200873,
+      "ticker": "GEV",
+      "ticker_return_pct": 0.9242623493805446
+    },
+    {
+      "alpha_return_pct": -2.1552267567040317,
+      "benchmark_return_pct": -0.8660309552200873,
+      "date": "2026-08-12",
+      "direction": "SHORT",
+      "entry_price": 206.04,
+      "evaluated_at": "2026-08-13T14:37:12.892823+00:00",
+      "evaluation_id": "2026-08-12:KLAC:SHORT:2",
+      "latest_price": 212.26499938964844,
+      "learning_reward": -0.43104535134080635,
+      "position_return_pct": -3.021257711924119,
+      "recommendation_confidence": 91.25,
+      "regime": "nan",
+      "score": 96.8,
+      "spy_return_pct": 0.8660309552200873,
+      "ticker": "KLAC",
+      "ticker_return_pct": 3.021257711924119
+    },
+    {
+      "alpha_return_pct": 0.13790242970352917,
+      "benchmark_return_pct": -0.8660309552200873,
+      "date": "2026-08-12",
+      "direction": "SHORT",
+      "entry_price": 1049.27,
+      "evaluated_at": "2026-08-13T14:37:13.091768+00:00",
+      "evaluation_id": "2026-08-12:GS:SHORT:3",
+      "latest_price": 1056.9100341796875,
+      "learning_reward": 0.027580485940705834,
+      "position_return_pct": -0.7281285255165582,
+      "recommendation_confidence": 90.15,
+      "regime": "nan",
+      "score": 95.04,
+      "spy_return_pct": 0.8660309552200873,
+      "ticker": "GS",
+      "ticker_return_pct": 0.7281285255165582
+    },
+    {
+      "alpha_return_pct": -6.670304867989696,
+      "benchmark_return_pct": -0.8660309552200873,
+      "date": "2026-08-12",
+      "direction": "SHORT",
+      "entry_price": 268.3,
+      "evaluated_at": "2026-08-13T14:37:13.205810+00:00",
+      "evaluation_id": "2026-08-12:ARM:SHORT:4",
+      "latest_price": 288.5199890136719,
+      "learning_reward": -1.0,
+      "position_return_pct": -7.536335823209783,
+      "recommendation_confidence": 88.65,
+      "regime": "nan",
+      "score": 92.64,
+      "spy_return_pct": 0.8660309552200873,
+      "ticker": "ARM",
+      "ticker_return_pct": 7.536335823209783
+    },
+    {
+      "alpha_return_pct": 1.1919369717203754,
+      "benchmark_return_pct": -0.8660309552200873,
+      "date": "2026-08-12",
+      "direction": "SHORT",
+      "entry_price": 862.22,
+      "evaluated_at": "2026-08-13T14:37:13.477757+00:00",
+      "evaluation_id": "2026-08-12:CAT:SHORT:5",
+      "latest_price": 859.4099731445312,
+      "learning_reward": 0.23838739434407508,
+      "position_return_pct": 0.32590601650028805,
+      "recommendation_confidence": 87.2,
+      "regime": "nan",
+      "score": 90.32,
+      "spy_return_pct": 0.8660309552200873,
+      "ticker": "CAT",
+      "ticker_return_pct": -0.32590601650028805
     }
   ],
   "last_evaluation_summary": {
-    "avg_alpha_return_pct": -1.4129972917061788,
+    "avg_alpha_return_pct": -1.510784723486056,
     "best": {
-      "alpha_return_pct": 1.8309099084406366,
-      "ticker": "ADI"
+      "alpha_return_pct": 1.1919369717203754,
+      "ticker": "CAT"
     },
-    "evaluated_new": 6,
-    "win_rate": 0.5,
+    "evaluated_new": 5,
+    "win_rate": 0.4,
     "worst": {
-      "alpha_return_pct": -6.137460903010528,
-      "ticker": "TPR"
+      "alpha_return_pct": -6.670304867989696,
+      "ticker": "ARM"
     }
   },
-  "last_updated": "2026-08-12T14:36:00.061264+00:00",
+  "last_updated": "2026-08-13T14:37:13.477903+00:00",
   "learned_weights": {
     "analyst_revisions": 0.06412051525997955,
     "earnings_quality": 0.04626196859818329,
