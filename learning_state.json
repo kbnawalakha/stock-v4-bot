@@ -129,7 +129,10 @@
     "2026-08-12:CAT:SHORT:5",
     "2026-08-12:GEV:SHORT:1",
     "2026-08-12:GS:SHORT:3",
-    "2026-08-12:KLAC:SHORT:2"
+    "2026-08-12:KLAC:SHORT:2",
+    "2026-08-13:AMD:SHORT:3",
+    "2026-08-13:HOOD:SHORT:1",
+    "2026-08-13:MU:SHORT:2"
   ],
   "evaluated_recommendations": [
     "2026-06-03:AAPL:3",
@@ -261,7 +264,10 @@
     "2026-08-12:CAT:SHORT:5",
     "2026-08-12:GEV:SHORT:1",
     "2026-08-12:GS:SHORT:3",
-    "2026-08-12:KLAC:SHORT:2"
+    "2026-08-12:KLAC:SHORT:2",
+    "2026-08-13:AMD:SHORT:3",
+    "2026-08-13:HOOD:SHORT:1",
+    "2026-08-13:MU:SHORT:2"
   ],
   "evaluation_history": [
     {
@@ -2468,22 +2474,76 @@
       "spy_return_pct": 0.8660309552200873,
       "ticker": "CAT",
       "ticker_return_pct": -0.32590601650028805
+    },
+    {
+      "alpha_return_pct": 2.454834613543777,
+      "benchmark_return_pct": 0.12341517542938663,
+      "date": "2026-08-13",
+      "direction": "SHORT",
+      "entry_price": 99.68,
+      "evaluated_at": "2026-08-14T14:31:04.696488+00:00",
+      "evaluation_id": "2026-08-13:HOOD:SHORT:1",
+      "latest_price": 97.11000061035156,
+      "learning_reward": 0.4909669227087554,
+      "position_return_pct": 2.5782497889731637,
+      "recommendation_confidence": 99.7,
+      "regime": "nan",
+      "score": 100.0,
+      "spy_return_pct": -0.12341517542938663,
+      "ticker": "HOOD",
+      "ticker_return_pct": -2.5782497889731637
+    },
+    {
+      "alpha_return_pct": -1.8356762766419288,
+      "benchmark_return_pct": 0.12341517542938663,
+      "date": "2026-08-13",
+      "direction": "SHORT",
+      "entry_price": 950.79,
+      "evaluated_at": "2026-08-14T14:31:04.873788+00:00",
+      "evaluation_id": "2026-08-13:MU:SHORT:2",
+      "latest_price": 967.0700073242188,
+      "learning_reward": -0.36713525532838576,
+      "position_return_pct": -1.7122611012125422,
+      "recommendation_confidence": 91.3,
+      "regime": "nan",
+      "score": 96.88,
+      "spy_return_pct": -0.12341517542938663,
+      "ticker": "MU",
+      "ticker_return_pct": 1.7122611012125422
+    },
+    {
+      "alpha_return_pct": -1.7528286949017313,
+      "benchmark_return_pct": 0.12341517542938663,
+      "date": "2026-08-13",
+      "direction": "SHORT",
+      "entry_price": 495.27,
+      "evaluated_at": "2026-08-14T14:31:05.016488+00:00",
+      "evaluation_id": "2026-08-13:AMD:SHORT:3",
+      "latest_price": 503.3399963378906,
+      "learning_reward": -0.35056573898034626,
+      "position_return_pct": -1.6294135194723447,
+      "recommendation_confidence": 88.95,
+      "regime": "nan",
+      "score": 93.12,
+      "spy_return_pct": -0.12341517542938663,
+      "ticker": "AMD",
+      "ticker_return_pct": 1.6294135194723447
     }
   ],
   "last_evaluation_summary": {
-    "avg_alpha_return_pct": -1.510784723486056,
+    "avg_alpha_return_pct": -0.37789011933329436,
     "best": {
-      "alpha_return_pct": 1.1919369717203754,
-      "ticker": "CAT"
+      "alpha_return_pct": 2.454834613543777,
+      "ticker": "HOOD"
     },
-    "evaluated_new": 5,
-    "win_rate": 0.4,
+    "evaluated_new": 3,
+    "win_rate": 0.3333333333333333,
     "worst": {
-      "alpha_return_pct": -6.670304867989696,
-      "ticker": "ARM"
+      "alpha_return_pct": -1.8356762766419288,
+      "ticker": "MU"
     }
   },
-  "last_updated": "2026-08-13T14:37:13.477903+00:00",
+  "last_updated": "2026-08-14T14:31:05.016678+00:00",
   "learned_weights": {
     "analyst_revisions": 0.06412051525997955,
     "earnings_quality": 0.04626196859818329,
