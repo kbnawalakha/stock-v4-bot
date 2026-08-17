@@ -2731,19 +2731,11 @@
     }
   ],
   "last_evaluation_summary": {
-    "avg_alpha_return_pct": -0.16154731870921757,
-    "best": {
-      "alpha_return_pct": 2.05752124463896,
-      "ticker": "HWM"
-    },
-    "evaluated_new": 10,
-    "win_rate": 0.4,
-    "worst": {
-      "alpha_return_pct": -2.1588049428895584,
-      "ticker": "AMD"
-    }
+    "avg_alpha_return_pct": 0.0,
+    "evaluated_new": 0,
+    "win_rate": 0.0
   },
-  "last_updated": "2026-08-17T05:34:06.624577+00:00",
+  "last_updated": "2026-08-17T06:51:36.152156+00:00",
   "learned_weights": {
     "analyst_revisions": 0.06371967270999393,
     "earnings_quality": 0.04636360100408909,
