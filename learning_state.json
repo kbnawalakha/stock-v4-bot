@@ -3611,19 +3611,11 @@
     }
   ],
   "last_evaluation_summary": {
-    "avg_alpha_return_pct": -0.2515873612519459,
-    "best": {
-      "alpha_return_pct": 2.558872549488733,
-      "ticker": "EIX"
-    },
-    "evaluated_new": 5,
-    "win_rate": 0.4,
-    "worst": {
-      "alpha_return_pct": -2.6876592022783585,
-      "ticker": "ARE"
-    }
+    "avg_alpha_return_pct": 0.0,
+    "evaluated_new": 0,
+    "win_rate": 0.0
   },
-  "last_updated": "2026-08-24T05:36:59.454323+00:00",
+  "last_updated": "2026-08-24T06:54:19.351273+00:00",
   "learned_weights": {
     "analyst_revisions": 0.06216840392235596,
     "earnings_quality": 0.04736059252869795,
