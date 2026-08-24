@@ -181,7 +181,12 @@
     "2026-08-20:ETR:SHORT:10",
     "2026-08-20:MSFT:BULL:1",
     "2026-08-20:OXY:BULL:5",
-    "2026-08-20:SNOW:BULL:3"
+    "2026-08-20:SNOW:BULL:3",
+    "2026-08-21:ARE:SHORT:5",
+    "2026-08-21:CTVA:SHORT:2",
+    "2026-08-21:EIX:SHORT:3",
+    "2026-08-21:KDP:SHORT:4",
+    "2026-08-21:PGR:SHORT:1"
   ],
   "evaluated_recommendations": [
     "2026-06-03:AAPL:3",
@@ -365,7 +370,12 @@
     "2026-08-20:ETR:SHORT:10",
     "2026-08-20:MSFT:BULL:1",
     "2026-08-20:OXY:BULL:5",
-    "2026-08-20:SNOW:BULL:3"
+    "2026-08-20:SNOW:BULL:3",
+    "2026-08-21:ARE:SHORT:5",
+    "2026-08-21:CTVA:SHORT:2",
+    "2026-08-21:EIX:SHORT:3",
+    "2026-08-21:KDP:SHORT:4",
+    "2026-08-21:PGR:SHORT:1"
   ],
   "evaluation_history": [
     {
@@ -3508,22 +3518,112 @@
       "spy_return_pct": 0.3501237910820798,
       "ticker": "ETR",
       "ticker_return_pct": -1.4369933677229163
+    },
+    {
+      "alpha_return_pct": 0.4720412221782544,
+      "benchmark_return_pct": -0.0,
+      "date": "2026-08-21",
+      "direction": "SHORT",
+      "entry_price": 220.32,
+      "evaluated_at": "2026-08-24T05:36:58.412339+00:00",
+      "evaluation_id": "2026-08-21:PGR:SHORT:1",
+      "latest_price": 219.27999877929688,
+      "learning_reward": 0.09440824443565088,
+      "position_return_pct": 0.4720412221782544,
+      "recommendation_confidence": 100.0,
+      "regime": "nan",
+      "score": 100.0,
+      "spy_return_pct": 0.0,
+      "ticker": "PGR",
+      "ticker_return_pct": -0.4720412221782544
+    },
+    {
+      "alpha_return_pct": -1.2252486578308686,
+      "benchmark_return_pct": -0.0,
+      "date": "2026-08-21",
+      "direction": "SHORT",
+      "entry_price": 80.8,
+      "evaluated_at": "2026-08-24T05:36:58.606561+00:00",
+      "evaluation_id": "2026-08-21:CTVA:SHORT:2",
+      "latest_price": 81.79000091552734,
+      "learning_reward": -0.2450497315661737,
+      "position_return_pct": -1.2252486578308686,
+      "recommendation_confidence": 93.0,
+      "regime": "nan",
+      "score": 99.6,
+      "spy_return_pct": 0.0,
+      "ticker": "CTVA",
+      "ticker_return_pct": 1.2252486578308686
+    },
+    {
+      "alpha_return_pct": 2.558872549488733,
+      "benchmark_return_pct": -0.0,
+      "date": "2026-08-21",
+      "direction": "SHORT",
+      "entry_price": 73.47,
+      "evaluated_at": "2026-08-24T05:36:58.916183+00:00",
+      "evaluation_id": "2026-08-21:EIX:SHORT:3",
+      "latest_price": 71.58999633789062,
+      "learning_reward": 0.5117745098977466,
+      "position_return_pct": 2.558872549488733,
+      "recommendation_confidence": 92.25,
+      "regime": "nan",
+      "score": 98.4,
+      "spy_return_pct": 0.0,
+      "ticker": "EIX",
+      "ticker_return_pct": -2.558872549488733
+    },
+    {
+      "alpha_return_pct": -0.3759427178174901,
+      "benchmark_return_pct": -0.0,
+      "date": "2026-08-21",
+      "direction": "SHORT",
+      "entry_price": 31.92,
+      "evaluated_at": "2026-08-24T05:36:59.198833+00:00",
+      "evaluation_id": "2026-08-21:KDP:SHORT:4",
+      "latest_price": 32.040000915527344,
+      "learning_reward": -0.07518854356349802,
+      "position_return_pct": -0.3759427178174901,
+      "recommendation_confidence": 92.25,
+      "regime": "nan",
+      "score": 98.4,
+      "spy_return_pct": 0.0,
+      "ticker": "KDP",
+      "ticker_return_pct": 0.3759427178174901
+    },
+    {
+      "alpha_return_pct": -2.6876592022783585,
+      "benchmark_return_pct": -0.0,
+      "date": "2026-08-21",
+      "direction": "SHORT",
+      "entry_price": 52.09,
+      "evaluated_at": "2026-08-24T05:36:59.454180+00:00",
+      "evaluation_id": "2026-08-21:ARE:SHORT:5",
+      "latest_price": 53.4900016784668,
+      "learning_reward": -0.5375318404556717,
+      "position_return_pct": -2.6876592022783585,
+      "recommendation_confidence": 91.55,
+      "regime": "nan",
+      "score": 97.28,
+      "spy_return_pct": 0.0,
+      "ticker": "ARE",
+      "ticker_return_pct": 2.6876592022783585
     }
   ],
   "last_evaluation_summary": {
-    "avg_alpha_return_pct": 0.49572299662279606,
+    "avg_alpha_return_pct": -0.2515873612519459,
     "best": {
-      "alpha_return_pct": 2.647487407900795,
-      "ticker": "AEP"
+      "alpha_return_pct": 2.558872549488733,
+      "ticker": "EIX"
     },
-    "evaluated_new": 10,
-    "win_rate": 0.7,
+    "evaluated_new": 5,
+    "win_rate": 0.4,
     "worst": {
-      "alpha_return_pct": -1.5522334533072724,
-      "ticker": "BAX"
+      "alpha_return_pct": -2.6876592022783585,
+      "ticker": "ARE"
     }
   },
-  "last_updated": "2026-08-21T14:06:31.768965+00:00",
+  "last_updated": "2026-08-24T05:36:59.454323+00:00",
   "learned_weights": {
     "analyst_revisions": 0.06216840392235596,
     "earnings_quality": 0.04736059252869795,
