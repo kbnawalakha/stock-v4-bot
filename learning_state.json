@@ -209,7 +209,12 @@
     "2026-08-25:PLD:SHORT:4",
     "2026-08-25:UPS:SHORT:7",
     "2026-08-25:VMRK:SHORT:5",
-    "2026-08-25:WST:BULL:2"
+    "2026-08-25:WST:BULL:2",
+    "2026-08-26:AAPL:SHORT:1",
+    "2026-08-26:LIN:SHORT:2",
+    "2026-08-26:MO:SHORT:3",
+    "2026-08-26:UPS:SHORT:5",
+    "2026-08-26:VMRK:SHORT:4"
   ],
   "evaluated_recommendations": [
     "2026-06-03:AAPL:3",
@@ -421,7 +426,12 @@
     "2026-08-25:PLD:SHORT:4",
     "2026-08-25:UPS:SHORT:7",
     "2026-08-25:VMRK:SHORT:5",
-    "2026-08-25:WST:BULL:2"
+    "2026-08-25:WST:BULL:2",
+    "2026-08-26:AAPL:SHORT:1",
+    "2026-08-26:LIN:SHORT:2",
+    "2026-08-26:MO:SHORT:3",
+    "2026-08-26:UPS:SHORT:5",
+    "2026-08-26:VMRK:SHORT:4"
   ],
   "evaluation_history": [
     {
@@ -4068,22 +4078,112 @@
       "spy_return_pct": 0.08617647018978047,
       "ticker": "UPS",
       "ticker_return_pct": 1.3731568178058984
+    },
+    {
+      "alpha_return_pct": -3.828521363592685,
+      "benchmark_return_pct": 0.12009235514238714,
+      "date": "2026-08-26",
+      "direction": "SHORT",
+      "entry_price": 313.34,
+      "evaluated_at": "2026-10-05T13:39:11.821524+00:00",
+      "evaluation_id": "2026-08-26:AAPL:SHORT:1",
+      "latest_price": 324.9599914550781,
+      "learning_reward": -0.765704272718537,
+      "position_return_pct": -3.708429008450298,
+      "recommendation_confidence": 100.0,
+      "regime": "nan",
+      "score": 100.0,
+      "spy_return_pct": -0.12009235514238714,
+      "ticker": "AAPL",
+      "ticker_return_pct": 3.708429008450298
+    },
+    {
+      "alpha_return_pct": 1.3142100425907688,
+      "benchmark_return_pct": 0.12009235514238714,
+      "date": "2026-08-26",
+      "direction": "SHORT",
+      "entry_price": 492.92,
+      "evaluated_at": "2026-10-05T13:39:12.018238+00:00",
+      "evaluation_id": "2026-08-26:LIN:SHORT:2",
+      "latest_price": 485.85003662109375,
+      "learning_reward": 0.26284200851815376,
+      "position_return_pct": 1.434302397733156,
+      "recommendation_confidence": 93.15,
+      "regime": "nan",
+      "score": 99.84,
+      "spy_return_pct": -0.12009235514238714,
+      "ticker": "LIN",
+      "ticker_return_pct": -1.434302397733156
+    },
+    {
+      "alpha_return_pct": 0.40801027741926843,
+      "benchmark_return_pct": 0.12009235514238714,
+      "date": "2026-08-26",
+      "direction": "SHORT",
+      "entry_price": 68.83,
+      "evaluated_at": "2026-10-05T13:39:12.242837+00:00",
+      "evaluation_id": "2026-08-26:MO:SHORT:3",
+      "latest_price": 68.46650695800781,
+      "learning_reward": 0.08160205548385369,
+      "position_return_pct": 0.5281026325616556,
+      "recommendation_confidence": 93.0,
+      "regime": "nan",
+      "score": 99.6,
+      "spy_return_pct": -0.12009235514238714,
+      "ticker": "MO",
+      "ticker_return_pct": -0.5281026325616556
+    },
+    {
+      "alpha_return_pct": 3.859192168364445,
+      "benchmark_return_pct": 0.12009235514238714,
+      "date": "2026-08-26",
+      "direction": "SHORT",
+      "entry_price": 67.6,
+      "evaluated_at": "2026-10-05T13:39:12.387816+00:00",
+      "evaluation_id": "2026-08-26:VMRK:SHORT:4",
+      "latest_price": 64.91000366210938,
+      "learning_reward": 0.771838433672889,
+      "position_return_pct": 3.979284523506832,
+      "recommendation_confidence": 92.65,
+      "regime": "nan",
+      "score": 99.04,
+      "spy_return_pct": -0.12009235514238714,
+      "ticker": "VMRK",
+      "ticker_return_pct": -3.979284523506832
+    },
+    {
+      "alpha_return_pct": 2.6088952404851318,
+      "benchmark_return_pct": 0.12009235514238714,
+      "date": "2026-08-26",
+      "direction": "SHORT",
+      "entry_price": 105.9,
+      "evaluated_at": "2026-10-05T13:39:12.551999+00:00",
+      "evaluation_id": "2026-08-26:UPS:SHORT:5",
+      "latest_price": 103.01000213623047,
+      "learning_reward": 0.5217790480970264,
+      "position_return_pct": 2.728987595627519,
+      "recommendation_confidence": 91.4,
+      "regime": "nan",
+      "score": 97.04,
+      "spy_return_pct": -0.12009235514238714,
+      "ticker": "UPS",
+      "ticker_return_pct": -2.728987595627519
     }
   ],
   "last_evaluation_summary": {
-    "avg_alpha_return_pct": -0.6243946853722109,
+    "avg_alpha_return_pct": 0.8723572730533856,
     "best": {
-      "alpha_return_pct": 1.6369729965611368,
-      "ticker": "MSFT"
+      "alpha_return_pct": 3.859192168364445,
+      "ticker": "VMRK"
     },
-    "evaluated_new": 7,
-    "win_rate": 0.2857142857142857,
+    "evaluated_new": 5,
+    "win_rate": 0.8,
     "worst": {
-      "alpha_return_pct": -2.0721841457918,
-      "ticker": "CTVA"
+      "alpha_return_pct": -3.828521363592685,
+      "ticker": "AAPL"
     }
   },
-  "last_updated": "2026-08-26T14:11:53.187135+00:00",
+  "last_updated": "2026-10-05T13:39:12.552180+00:00",
   "learned_weights": {
     "analyst_revisions": 0.06286127647247663,
     "earnings_quality": 0.04693767857979624,
