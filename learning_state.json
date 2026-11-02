@@ -220,7 +220,12 @@
     "2026-10-05:CGNX:SHORT:4",
     "2026-10-05:CSCO:SHORT:5",
     "2026-10-05:HAS:SHORT:3",
-    "2026-10-05:OKTA:BULL:1"
+    "2026-10-05:OKTA:BULL:1",
+    "2026-10-12:ACGL:SHORT:4",
+    "2026-10-12:ADP:SHORT:3",
+    "2026-10-12:AMT:SHORT:1",
+    "2026-10-12:BDX:SHORT:2",
+    "2026-10-12:UNH:SHORT:5"
   ],
   "evaluated_recommendations": [
     "2026-06-03:AAPL:3",
@@ -443,7 +448,12 @@
     "2026-10-05:CGNX:SHORT:4",
     "2026-10-05:CSCO:SHORT:5",
     "2026-10-05:HAS:SHORT:3",
-    "2026-10-05:OKTA:BULL:1"
+    "2026-10-05:OKTA:BULL:1",
+    "2026-10-12:ACGL:SHORT:4",
+    "2026-10-12:ADP:SHORT:3",
+    "2026-10-12:AMT:SHORT:1",
+    "2026-10-12:BDX:SHORT:2",
+    "2026-10-12:UNH:SHORT:5"
   ],
   "evaluation_history": [
     {
@@ -4288,22 +4298,112 @@
       "spy_return_pct": 0.3942790816565678,
       "ticker": "CAH",
       "ticker_return_pct": 3.2004182419683724
+    },
+    {
+      "alpha_return_pct": -2.3252443176752124,
+      "benchmark_return_pct": 1.493380732782723,
+      "date": "2026-10-12",
+      "direction": "SHORT",
+      "entry_price": 181.52,
+      "evaluated_at": "2026-11-02T14:48:25.363654+00:00",
+      "evaluation_id": "2026-10-12:AMT:SHORT:1",
+      "latest_price": 183.02999877929688,
+      "learning_reward": -0.4650488635350425,
+      "position_return_pct": -0.8318635848924893,
+      "recommendation_confidence": 97.75,
+      "regime": "nan",
+      "score": 100.0,
+      "spy_return_pct": -1.493380732782723,
+      "ticker": "AMT",
+      "ticker_return_pct": 0.8318635848924893
+    },
+    {
+      "alpha_return_pct": -4.201907733571087,
+      "benchmark_return_pct": 1.493380732782723,
+      "date": "2026-10-12",
+      "direction": "SHORT",
+      "entry_price": 185.71,
+      "evaluated_at": "2026-11-02T14:48:25.593840+00:00",
+      "evaluation_id": "2026-10-12:BDX:SHORT:2",
+      "latest_price": 190.74000549316406,
+      "learning_reward": -0.8403815467142174,
+      "position_return_pct": -2.7085270007883633,
+      "recommendation_confidence": 100.0,
+      "regime": "nan",
+      "score": 100.0,
+      "spy_return_pct": -1.493380732782723,
+      "ticker": "BDX",
+      "ticker_return_pct": 2.7085270007883633
+    },
+    {
+      "alpha_return_pct": -6.486430253339048,
+      "benchmark_return_pct": 1.493380732782723,
+      "date": "2026-10-12",
+      "direction": "SHORT",
+      "entry_price": 273.38,
+      "evaluated_at": "2026-11-02T14:48:25.783683+00:00",
+      "evaluation_id": "2026-10-12:ADP:SHORT:3",
+      "latest_price": 287.0299987792969,
+      "learning_reward": -1.0,
+      "position_return_pct": -4.993049520556325,
+      "recommendation_confidence": 96.15,
+      "regime": "nan",
+      "score": 100.0,
+      "spy_return_pct": -1.493380732782723,
+      "ticker": "ADP",
+      "ticker_return_pct": 4.993049520556325
+    },
+    {
+      "alpha_return_pct": -5.220028154000433,
+      "benchmark_return_pct": 1.493380732782723,
+      "date": "2026-10-12",
+      "direction": "SHORT",
+      "entry_price": 96.87,
+      "evaluated_at": "2026-11-02T14:48:25.917172+00:00",
+      "evaluation_id": "2026-10-12:ACGL:SHORT:4",
+      "latest_price": 100.4800033569336,
+      "learning_reward": -1.0,
+      "position_return_pct": -3.7266474212177103,
+      "recommendation_confidence": 90.75,
+      "regime": "nan",
+      "score": 96.0,
+      "spy_return_pct": -1.493380732782723,
+      "ticker": "ACGL",
+      "ticker_return_pct": 3.7266474212177103
+    },
+    {
+      "alpha_return_pct": -9.005602924039835,
+      "benchmark_return_pct": 1.493380732782723,
+      "date": "2026-10-12",
+      "direction": "SHORT",
+      "entry_price": 378.45,
+      "evaluated_at": "2026-11-02T14:48:26.086276+00:00",
+      "evaluation_id": "2026-10-12:UNH:SHORT:5",
+      "latest_price": 406.8800048828125,
+      "learning_reward": -1.0,
+      "position_return_pct": -7.512222191257112,
+      "recommendation_confidence": 88.65,
+      "regime": "nan",
+      "score": 92.64,
+      "spy_return_pct": -1.493380732782723,
+      "ticker": "UNH",
+      "ticker_return_pct": 7.512222191257112
     }
   ],
   "last_evaluation_summary": {
-    "avg_alpha_return_pct": -0.4005878045010384,
+    "avg_alpha_return_pct": -5.447842676525123,
     "best": {
-      "alpha_return_pct": 6.611861338946623,
-      "ticker": "OKTA"
+      "alpha_return_pct": -2.3252443176752124,
+      "ticker": "AMT"
     },
-    "evaluated_new": 6,
-    "win_rate": 0.3333333333333333,
+    "evaluated_new": 5,
+    "win_rate": 0.0,
     "worst": {
-      "alpha_return_pct": -4.4573371064868805,
-      "ticker": "HAS"
+      "alpha_return_pct": -9.005602924039835,
+      "ticker": "UNH"
     }
   },
-  "last_updated": "2026-10-12T14:28:30.018593+00:00",
+  "last_updated": "2026-11-02T14:48:26.086474+00:00",
   "learned_weights": {
     "analyst_revisions": 0.06293031743080899,
     "earnings_quality": 0.046521361822388835,
